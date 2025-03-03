@@ -4,6 +4,30 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import MetricsChart from '@/components/MetricsChart';
 import { generateDateLabels, generateSampleData, formatNumber } from '@/lib/utils';
+import { Bar, Line } from 'react-chartjs-2';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  LineElement,
+  PointElement,
+  Title,
+  Tooltip,
+  Legend,
+} from 'chart.js';
+
+// Register ChartJS components
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  LineElement,
+  PointElement,
+  Title,
+  Tooltip,
+  Legend
+);
 
 type TimeframeOption = 'day' | 'week' | 'month';
 
@@ -184,7 +208,7 @@ export default function Dashboard() {
         
         <div className="ml-auto">
           <Link
-            href="/connect"
+            href="/accounts/connect"
             className="inline-flex items-center px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-md transition-colors"
           >
             <span className="mr-2">+</span> Add Account
@@ -300,7 +324,7 @@ export default function Dashboard() {
               
               {/* Add more accounts button */}
               <Link 
-                href="/connect"
+                href="/accounts/connect"
                 className="block w-full p-4 border border-dashed border-dark-300 rounded-lg text-gray-400 hover:text-white hover:border-primary-500 transition-colors text-center"
               >
                 + Add new social media account

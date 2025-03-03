@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
-// Import AuthProvider
+// Import AuthProvider and components
 import { AuthProvider } from "@/lib/auth";
 import PublicHeader from "@/components/PublicHeader";
 
@@ -29,19 +29,17 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-gray-900`}
       >
-        {/* Wrap everything with AuthProvider */}
         <AuthProvider>
           <div className="flex flex-col min-h-screen">
-            {/* Conditional header will check auth status */}
             <PublicHeader />
 
             <main className="flex-grow">
               {children}
             </main>
 
-            <footer className="bg-dark-600 border-t border-dark-400 py-8">
+            <footer className="bg-gray-800 border-t border-gray-700 py-8">
               <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="flex flex-col md:flex-row justify-between items-center">
                   <div className="mb-4 md:mb-0">
