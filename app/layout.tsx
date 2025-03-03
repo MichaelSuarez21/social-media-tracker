@@ -4,21 +4,29 @@ import "./globals.css";
 
 // Import AuthProvider and components
 import { AuthProvider } from "@/lib/auth";
-import PublicHeader from "@/components/PublicHeader";
+import HeaderManager from "@/components/HeaderManager";
+import logger, { configureLogger } from "@/lib/logger";
 
+// Configure logger on app initialization
+configureLogger();
+
+// Log app startup
+logger.info('App', 'SocialTrack application initializing');
+
+// Use Google Fonts
 const geistSans = Geist({
-  variable: "--font-geist-sans",
   subsets: ["latin"],
+  variable: "--font-geist-sans",
 });
 
 const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
   subsets: ["latin"],
+  variable: "--font-geist-mono",
 });
 
 export const metadata: Metadata = {
-  title: "Social Media Tracker",
-  description: "Monitor and analyze all your social media accounts in one place",
+  title: "SocialTrack - Social Media Analytics",
+  description: "Track and analyze your social media performance",
 };
 
 export default function RootLayout({
@@ -33,7 +41,7 @@ export default function RootLayout({
       >
         <AuthProvider>
           <div className="flex flex-col min-h-screen">
-            <PublicHeader />
+            <HeaderManager />
 
             <main className="flex-grow">
               {children}
@@ -43,19 +51,18 @@ export default function RootLayout({
               <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="flex flex-col md:flex-row justify-between items-center">
                   <div className="mb-4 md:mb-0">
-                    <p className="text-gray-400">
-                      © 2024 SocialTrack. All rights reserved.
-                    </p>
+                    <h3 className="text-xl font-bold text-white">SocialTrack</h3>
+                    <p className="text-gray-400">Analyze and optimize your social media presence</p>
                   </div>
                   <div className="flex space-x-6">
-                    <a href="/privacy" className="text-gray-400 hover:text-gray-300">
-                      Privacy
-                    </a>
-                    <a href="/terms" className="text-gray-400 hover:text-gray-300">
+                    <a href="#" className="text-gray-400 hover:text-white transition-colors">
                       Terms
                     </a>
-                    <a href="/contact" className="text-gray-400 hover:text-gray-300">
-                      Contact
+                    <a href="#" className="text-gray-400 hover:text-white transition-colors">
+                      Privacy
+                    </a>
+                    <a href="#" className="text-gray-400 hover:text-white transition-colors">
+                      Help
                     </a>
                   </div>
                 </div>

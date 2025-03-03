@@ -5,6 +5,7 @@ import Link from 'next/link';
 import MetricsChart from '@/components/MetricsChart';
 import { generateDateLabels, generateSampleData, formatNumber } from '@/lib/utils';
 import { Bar, Line } from 'react-chartjs-2';
+import { useAuth } from '@/lib/auth';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -34,15 +35,31 @@ type TimeframeOption = 'day' | 'week' | 'month';
 export default function Dashboard() {
   const [timeframe, setTimeframe] = useState<TimeframeOption>('week');
   const [isLoading, setIsLoading] = useState(true);
+  const { user, profile, isLoading: authLoading } = useAuth();
 
-  // Simulate loading data
+  // Dashboard mounting logs
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-    }, 1000);
+    console.log('Dashboard: Component mounted', { 
+      user: !!user, 
+      profile: !!profile,
+      userId: user?.id,
+      profileId: profile?.id,
+      authLoading 
+    });
     
-    return () => clearTimeout(timer);
-  }, []);
+    // CRITICAL CHANGE: Immediately set loading to false
+    // Don't wait for profile or auth loading to complete
+    console.log('Dashboard: Forcing immediate loading completion');
+    setIsLoading(false);
+  }, [user, profile, authLoading]);
+
+  // REMOVE the other loading-related useEffects and replace with this one
+  useEffect(() => {
+    if (isLoading) {
+      console.log('Dashboard: Still loading after immediate force, applying second force');
+      setIsLoading(false);
+    }
+  }, [isLoading]);
 
   // Generate labels based on selected timeframe
   const dateLabels = generateDateLabels(timeframe, timeframe === 'day' ? 14 : (timeframe === 'week' ? 8 : 6));

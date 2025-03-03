@@ -1,7 +1,8 @@
 'use client';
 import AuthGuard from '@/components/AuthGuard';
-import DashboardHeader from '@/components/DashboardHeader';
+import EnsureProfile from '@/components/EnsureProfile';
 import { usePathname } from 'next/navigation';
+import logger from '@/lib/logger';
 
 export default function AuthenticatedLayout({
   children,
@@ -9,16 +10,17 @@ export default function AuthenticatedLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  console.log('AuthenticatedLayout rendering for path:', pathname);
+  logger.debug('AuthenticatedLayout', 'Rendering for path:', pathname);
 
   return (
     <AuthGuard>
-      <div className="min-h-screen bg-dark-600">
-        <DashboardHeader />
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          {children}
+      <EnsureProfile>
+        <div className="min-h-screen bg-dark-600">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+            {children}
+          </div>
         </div>
-      </div>
+      </EnsureProfile>
     </AuthGuard>
   );
 } 

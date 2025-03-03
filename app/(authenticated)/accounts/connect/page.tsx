@@ -1,8 +1,19 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { FaTwitter, FaInstagram, FaFacebook, FaYoutube, FaTiktok, FaPinterest } from 'react-icons/fa';
+import { SiLinkedin, SiBluesky } from 'react-icons/si';
+
+// Define platform interface for scalability
+interface SocialPlatform {
+  id: string;
+  name: string;
+  icon: React.ReactNode;
+  color: string;
+  available: boolean;
+}
 
 export default function ConnectAccountPage() {
   const router = useRouter();
@@ -12,16 +23,72 @@ export default function ConnectAccountPage() {
   const [selectedPlatform, setSelectedPlatform] = useState(initialPlatform);
   const [isConnecting, setIsConnecting] = useState(false);
 
-  const platforms = [
-    { id: 'twitter', name: 'Twitter', icon: '🐦' },
-    { id: 'instagram', name: 'Instagram', icon: '📸' },
-    { id: 'facebook', name: 'Facebook', icon: '👤' },
-    { id: 'youtube', name: 'YouTube', icon: '📹' },
-    { id: 'tiktok', name: 'TikTok', icon: '🎵' },
-    { id: 'pinterest', name: 'Pinterest', icon: '📌' },
-    { id: 'linkedin', name: 'LinkedIn', icon: '💼' },
-    { id: 'bluesky', name: 'BlueSky', icon: '🔷' },
+  // Define our supported platforms - easy to add new ones
+  const platforms: SocialPlatform[] = [
+    { 
+      id: 'twitter', 
+      name: 'Twitter', 
+      icon: <FaTwitter className="text-2xl" />, 
+      color: 'border-blue-500 bg-blue-900/20', 
+      available: true 
+    },
+    { 
+      id: 'instagram', 
+      name: 'Instagram', 
+      icon: <FaInstagram className="text-2xl" />, 
+      color: 'border-pink-500 bg-pink-900/20', 
+      available: false 
+    },
+    { 
+      id: 'facebook', 
+      name: 'Facebook', 
+      icon: <FaFacebook className="text-2xl" />, 
+      color: 'border-blue-600 bg-blue-900/20', 
+      available: false 
+    },
+    { 
+      id: 'youtube', 
+      name: 'YouTube', 
+      icon: <FaYoutube className="text-2xl" />, 
+      color: 'border-red-500 bg-red-900/20', 
+      available: false 
+    },
+    { 
+      id: 'tiktok', 
+      name: 'TikTok', 
+      icon: <FaTiktok className="text-2xl" />, 
+      color: 'border-gray-300 bg-gray-900/20', 
+      available: false 
+    },
+    { 
+      id: 'pinterest', 
+      name: 'Pinterest', 
+      icon: <FaPinterest className="text-2xl" />, 
+      color: 'border-red-600 bg-red-900/20', 
+      available: false 
+    },
+    { 
+      id: 'linkedin', 
+      name: 'LinkedIn', 
+      icon: <SiLinkedin className="text-2xl" />, 
+      color: 'border-blue-700 bg-blue-900/20', 
+      available: false 
+    },
+    { 
+      id: 'bluesky', 
+      name: 'BlueSky', 
+      icon: <SiBluesky className="text-2xl" />, 
+      color: 'border-blue-400 bg-blue-900/20', 
+      available: false 
+    },
   ];
+
+  // Auto-select platform from URL param on load
+  useEffect(() => {
+    if (initialPlatform) {
+      setSelectedPlatform(initialPlatform);
+    }
+  }, [initialPlatform]);
 
   const handleConnect = async () => {
     if (!selectedPlatform) {
@@ -29,21 +96,27 @@ export default function ConnectAccountPage() {
       return;
     }
 
+    const platform = platforms.find(p => p.id === selectedPlatform);
+    
+    if (!platform) {
+      alert('Invalid platform selected');
+      return;
+    }
+    
+    if (!platform.available) {
+      alert(`${platform.name} integration is coming soon!`);
+      return;
+    }
+
     setIsConnecting(true);
     
     try {
-      // In a real app, this would initiate OAuth flow
-      console.log(`Connecting to ${selectedPlatform}...`);
-      
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      // Redirect back to accounts page after successful connection
-      router.push('/accounts');
+      // Our new API structure uses a consistent pattern
+      window.location.href = `/api/social/${selectedPlatform}/login`;
+      return; // Don't reset isConnecting since we're navigating away
     } catch (error) {
       console.error('Error connecting account:', error);
       alert('Failed to connect account. Please try again.');
-    } finally {
       setIsConnecting(false);
     }
   };
@@ -69,13 +142,16 @@ export default function ConnectAccountPage() {
               key={platform.id}
               className={`p-4 rounded-lg border flex flex-col items-center justify-center h-24 transition-colors ${
                 selectedPlatform === platform.id
-                  ? 'border-blue-500 bg-blue-900/20'
+                  ? platform.color
                   : 'border-dark-400 bg-dark-600 hover:bg-dark-500'
-              }`}
+              } ${!platform.available ? 'opacity-60' : 'opacity-100'}`}
               onClick={() => setSelectedPlatform(platform.id)}
             >
-              <span className="text-2xl mb-2">{platform.icon}</span>
-              <span className="text-sm">{platform.name}</span>
+              {platform.icon}
+              <span className="text-sm mt-2">{platform.name}</span>
+              {!platform.available && (
+                <span className="text-xs text-gray-400 mt-1">Coming soon</span>
+              )}
             </button>
           ))}
         </div>
@@ -83,9 +159,9 @@ export default function ConnectAccountPage() {
         <div className="flex justify-end">
           <button
             onClick={handleConnect}
-            disabled={!selectedPlatform || isConnecting}
+            disabled={!selectedPlatform || isConnecting || !platforms.find(p => p.id === selectedPlatform)?.available}
             className={`px-6 py-2 rounded-md ${
-              !selectedPlatform
+              !selectedPlatform || !platforms.find(p => p.id === selectedPlatform)?.available
                 ? 'bg-gray-700 cursor-not-allowed'
                 : isConnecting
                 ? 'bg-blue-700 cursor-wait'

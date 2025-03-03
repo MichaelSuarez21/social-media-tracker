@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { auth } from '@/lib/supabase';
+import { useAuth } from '@/lib/auth';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -11,6 +11,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
+  const { signIn, signInWithProvider } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -18,30 +19,23 @@ export default function Login() {
     setError('');
 
     try {
-      const { data, error } = await auth.signIn(email, password);
-
-      if (error) {
-        throw error;
-      }
-
+      await signIn(email, password);
       // Redirect to dashboard on successful login
       router.push('/dashboard');
     } catch (error: any) {
+      console.error('Login error:', error);
       setError(error.message || 'Failed to sign in');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleSocialLogin = async (provider: 'google' | 'twitter') => {
+  const handleSocialLogin = async (provider: string) => {
     try {
-      // Using generic sign-in method for OAuth
-      const { data, error } = await auth.signInWithProvider(provider);
-
-      if (error) {
-        throw error;
-      }
+      await signInWithProvider(provider);
+      // The redirect will be handled by the OAuth provider
     } catch (error: any) {
+      console.error(`${provider} login error:`, error);
       setError(error.message || `Failed to sign in with ${provider}`);
     }
   };

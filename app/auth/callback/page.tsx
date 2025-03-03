@@ -11,12 +11,20 @@ export default function AuthCallbackPage() {
   useEffect(() => {
     const handleCallback = async () => {
       try {
-        // Get session to see if we have a new user
+        console.log('Auth callback page loaded - processing auth result');
+        
+        // Exchange the code for a session
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
         
-        if (sessionError) throw sessionError;
+        if (sessionError) {
+          console.error('Error getting session:', sessionError);
+          router.push('/login?error=session_error');
+          return;
+        }
         
         if (session?.user) {
+          console.log('User authenticated:', session.user.id);
+          
           // Check if profile exists
           const { data: profile, error: profileError } = await supabase
             .from('profiles')
@@ -25,6 +33,7 @@ export default function AuthCallbackPage() {
             .single();
             
           if (profileError && profileError.code === 'PGRST116') {
+            console.log('Profile not found, creating new profile for user');
             // Profile doesn't exist, create it
             const { error: insertError } = await supabase
               .from('profiles')
@@ -38,11 +47,19 @@ export default function AuthCallbackPage() {
                 }
               ]);
               
-            if (insertError) throw insertError;
+            if (insertError) {
+              console.error('Error creating profile:', insertError);
+              // Continue anyway, we can address profile issues later
+            }
+          } else {
+            console.log('Profile found for user');
           }
           
-          // Redirect to dashboard after successful auth and profile creation
+          // Redirect to dashboard after successful auth and profile management
           router.push('/dashboard');
+        } else {
+          console.error('No user session after authentication');
+          router.push('/login?error=no_session');
         }
       } catch (error) {
         console.error('Error in auth callback:', error);

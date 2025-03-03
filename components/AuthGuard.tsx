@@ -1,55 +1,60 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { auth } from '@/lib/supabase';
+import { useAuth } from '@/lib/auth';
+import { useRouter, usePathname } from 'next/navigation';
+import logger from '@/lib/logger';
 
 interface AuthGuardProps {
   children: React.ReactNode;
 }
 
 export default function AuthGuard({ children }: AuthGuardProps) {
-  const [isLoading, setIsLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const { user, isLoading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
+  const [forceRender, setForceRender] = useState(false);
 
   useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const { session, error } = await auth.getSession();
-        
-        if (error) {
-          throw error;
-        }
-        
-        if (session) {
-          setIsAuthenticated(true);
-        } else {
-          // No session found, redirect to login
-          router.push('/login');
-        }
-      } catch (error) {
-        console.error('Error checking authentication:', error);
-        router.push('/login');
-      } finally {
-        setIsLoading(false);
+    // Check authentication status
+    logger.debug('AuthGuard', 'Checking authentication status', { user: user?.id, authLoading: isLoading });
+
+    // Wait for auth to finish loading
+    if (!isLoading) {
+      if (!user) {
+        logger.info('AuthGuard', 'No user found, redirecting to login');
+        router.push(`/login?redirect=${encodeURIComponent(pathname || '')}`);
+      } else {
+        logger.debug('AuthGuard', 'User authenticated:', user.id);
       }
-    };
+    } else {
+      // Fallback for auth taking too long - force render anyway after timeout
+      const timer = setTimeout(() => {
+        if (isLoading) {
+          logger.warn('AuthGuard', 'Force rendering after timeout despite loading state', {
+            userId: user?.id,
+            pathname,
+            isLoading
+          });
+          setForceRender(true);
+        }
+      }, 2000);
 
-    checkAuth();
-  }, [router]);
+      return () => clearTimeout(timer);
+    }
+  }, [user, isLoading, router, pathname]);
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-dark-500">
-        <div className="text-center p-8 max-w-md">
-          <div className="w-16 h-16 border-4 border-primary-600 border-t-transparent rounded-full animate-spin mx-auto mb-6"></div>
-          <h1 className="text-2xl font-bold text-white mb-2">Loading...</h1>
-          <p className="text-gray-400">Please wait while we verify your credentials.</p>
-        </div>
-      </div>
-    );
+  // Show nothing while redirecting or checking auth
+  if (isLoading && !forceRender && !user) {
+    return null;
   }
 
-  return isAuthenticated ? <>{children}</> : null;
+  // If we have a user, show the content
+  if (user) {
+    logger.debug('AuthGuard', 'User exists, rendering content immediately', user.id);
+    return <>{children}</>;
+  }
+
+  // Fallback while redirecting
+  return null;
 } 

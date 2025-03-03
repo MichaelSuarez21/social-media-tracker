@@ -1,33 +1,25 @@
 'use client';
 
 import Link from 'next/link';
-import { useAuth } from '@/lib/auth';
 
 export default function PublicHeader() {
-  const { session, isLoading } = useAuth();
-
-  // Show nothing while loading to prevent flash
-  if (isLoading) {
-    return null;
-  }
-
-  // Don't render the header if user is authenticated
-  if (session) {
-    return null;
-  }
-
   return (
-    <header className="bg-gray-800 border-b border-gray-700">
-      <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between h-16 items-center">
-          <div className="flex">
-            <Link 
-              href="/"
-              className="flex items-center text-xl font-semibold text-white hover:text-gray-200 transition-colors"
-            >
-              SocialTrack
+    <header className="border-b border-dark-400 bg-dark-600 sticky top-0 z-10">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex justify-between items-center h-16">
+          <div className="flex items-center">
+            <Link href="/" className="flex items-center">
+              <svg
+                className="h-8 w-8 text-blue-500"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+              >
+                <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              <span className="ml-2 text-xl font-semibold">SocialTrack</span>
             </Link>
           </div>
+          
           <div className="flex items-center space-x-4">
             <Link
               href="/login"
@@ -43,7 +35,7 @@ export default function PublicHeader() {
             </Link>
           </div>
         </div>
-      </nav>
+      </div>
     </header>
   );
 } 

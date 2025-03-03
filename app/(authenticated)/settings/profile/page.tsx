@@ -3,11 +3,18 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import CheckTimezone from './check-timezone';
+import logger from '@/lib/logger';
+import { useRouter } from 'next/navigation';
 
 export default function ProfileSettingsPage() {
-  const { user, profile, updateProfile } = useAuth();
+  const router = useRouter();
+  const { user, profile, updateProfile, refreshProfile } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   
   const [formData, setFormData] = useState({
@@ -15,9 +22,27 @@ export default function ProfileSettingsPage() {
     timezone: '',
   });
 
+  // Try to refresh profile data on mount
+  useEffect(() => {
+    const loadProfile = async () => {
+      if (user && !profile) {
+        logger.debug('ProfilePage', 'User exists but no profile - triggering manual refresh');
+        try {
+          const refreshedProfile = await refreshProfile();
+          logger.debug('ProfilePage', 'Manually refreshed profile:', refreshedProfile);
+        } catch (error) {
+          logger.error('ProfilePage', 'Failed to manually refresh profile:', error);
+        }
+      }
+    };
+    
+    loadProfile();
+  }, [user, profile, refreshProfile]);
+  
   // Load initial data
   useEffect(() => {
     if (profile) {
+      logger.debug('ProfilePage', 'Setting form data from profile:', profile);
       setFormData({
         full_name: profile.full_name || '',
         timezone: profile.timezone || '',
@@ -25,17 +50,155 @@ export default function ProfileSettingsPage() {
     }
   }, [profile]);
 
+  // Directly check Supabase for profile data if needed
+  useEffect(() => {
+    const checkDatabase = async () => {
+      if (user && !profile) {
+        logger.debug('ProfilePage', 'No profile in state but user exists, checking database directly');
+        const supabase = createClientComponentClient();
+        
+        try {
+          // First check if profile exists
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', user.id)
+            .single();
+            
+          if (error) {
+            if (error.code === 'PGRST116') {
+              // No profile found, create one
+              logger.info('ProfilePage', 'Profile not found in database, creating one directly');
+              
+              const newProfile = {
+                id: user.id,
+                full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
+                avatar_url: user.user_metadata?.avatar_url || null,
+                timezone: null, // Use null for database
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              };
+              
+              logger.debug('ProfilePage', 'Creating profile with data:', newProfile);
+              
+              const { data: createdProfile, error: createError } = await supabase
+                .from('profiles')
+                .insert([newProfile])
+                .select('*')
+                .single();
+                
+              if (createError) {
+                logger.error('ProfilePage', 'Error creating profile directly:', createError);
+              } else {
+                logger.info('ProfilePage', 'Profile created directly:', createdProfile);
+                // Set form data from created profile
+                setFormData({
+                  full_name: createdProfile.full_name || '',
+                  timezone: createdProfile.timezone || '',
+                });
+                
+                // Try to refresh the profile in the auth context
+                await refreshProfile();
+              }
+            } else {
+              logger.error('ProfilePage', 'Error checking profile directly:', error);
+            }
+          } else if (data) {
+            logger.info('ProfilePage', 'Found profile directly in database:', data);
+            // We found profile data in Supabase but it's not in our auth state
+            setFormData({
+              full_name: data.full_name || '',
+              timezone: data.timezone || '',
+            });
+            
+            // Try to refresh the profile in the auth context
+            await refreshProfile();
+          }
+        } catch (err) {
+          logger.error('ProfilePage', 'Exception checking database:', err);
+        }
+      }
+    };
+    
+    checkDatabase();
+  }, [user, profile, refreshProfile]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
     setMessage(null);
+    
+    logger.debug('ProfilePage', 'Submitting profile update with data:', formData);
 
     try {
-      await updateProfile(formData);
-      setMessage({ type: 'success', text: 'Profile updated successfully!' });
+      // Create a clean copy of the form data to send to the API
+      const dataToUpdate: Record<string, any> = {};
+      
+      // Only include non-empty values that have actually changed from the profile
+      if (formData.full_name !== undefined && formData.full_name !== null && formData.full_name.trim() !== '') {
+        dataToUpdate.full_name = formData.full_name.trim();
+      }
+      
+      if (formData.timezone !== undefined && formData.timezone !== null) {
+        dataToUpdate.timezone = formData.timezone;
+      }
+      
+      // Prevent empty updates
+      if (Object.keys(dataToUpdate).length === 0) {
+        setMessage({ 
+          type: 'error', 
+          text: 'No changes to save' 
+        });
+        setIsSaving(false);
+        return;
+      }
+      
+      logger.debug('ProfilePage', 'Cleaned data for update:', dataToUpdate);
+      
+      // The updateProfile function now returns the updated profile
+      const updatedProfile = await updateProfile(dataToUpdate);
+      logger.debug('ProfilePage', 'Profile update result:', updatedProfile);
+      
+      if (!updatedProfile) {
+        logger.warn('ProfilePage', 'No profile data returned from update, forcing refresh');
+        // If updateProfile doesn't return data, force a refresh
+        const refreshedProfile = await refreshProfile();
+        if (!refreshedProfile) {
+          throw new Error('Failed to update and refresh profile');
+        }
+        
+        // Set the form data with the refreshed profile
+        setFormData({
+          full_name: refreshedProfile.full_name || '',
+          timezone: refreshedProfile.timezone || '',
+        });
+        
+        // Set success message
+        setMessage({ 
+          type: 'success', 
+          text: 'Profile updated successfully!' 
+        });
+        
+        return;
+      }
+      
+      // Update the form data with the values from the updated profile
+      setFormData({
+        full_name: updatedProfile.full_name || '',
+        timezone: updatedProfile.timezone || '',
+      });
+      
+      // Set success message
+      setMessage({ 
+        type: 'success', 
+        text: 'Profile updated successfully!' 
+      });
     } catch (error) {
-      console.error('Error updating profile:', error);
-      setMessage({ type: 'error', text: 'Failed to update profile. Please try again.' });
+      logger.error('ProfilePage', 'Error updating profile:', error);
+      setMessage({ 
+        type: 'error', 
+        text: `Failed to update profile: ${error instanceof Error ? error.message : 'Unknown error'}` 
+      });
     } finally {
       setIsSaving(false);
     }
@@ -69,10 +232,52 @@ export default function ProfileSettingsPage() {
       await updateProfile({ avatar_url: publicUrl });
       setMessage({ type: 'success', text: 'Profile picture updated successfully!' });
     } catch (error) {
-      console.error('Error uploading avatar:', error);
+      logger.error('ProfilePage', 'Error uploading avatar:', error);
       setMessage({ type: 'error', text: 'Failed to upload profile picture. Please try again.' });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmText !== user?.email) {
+      setMessage({ 
+        type: 'error', 
+        text: 'Please type your email address correctly to confirm deletion.' 
+      });
+      return;
+    }
+
+    setIsDeleting(true);
+    setMessage(null);
+
+    try {
+      // Delete the user's profile first
+      const supabase = createClientComponentClient();
+      
+      // Delete from profiles table
+      await supabase
+        .from('profiles')
+        .delete()
+        .eq('id', user.id);
+      
+      // Delete from auth
+      const { error } = await supabase.auth.admin.deleteUser(user.id);
+      
+      if (error) throw error;
+      
+      // Sign out
+      await supabase.auth.signOut();
+      
+      // Redirect to home page
+      router.push('/?deleted=true');
+    } catch (error) {
+      logger.error('ProfilePage', 'Error deleting account:', error);
+      setMessage({ 
+        type: 'error', 
+        text: `Failed to delete account: ${error instanceof Error ? error.message : 'Unknown error'}` 
+      });
+      setIsDeleting(false);
     }
   };
 
@@ -130,7 +335,7 @@ export default function ProfileSettingsPage() {
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="bg-dark-500 rounded-lg p-6">
+      <form onSubmit={handleSubmit} className="bg-dark-500 rounded-lg p-6 mb-8">
         <h2 className="text-xl font-semibold mb-6">Personal Information</h2>
         
         <div className="space-y-6">
@@ -203,6 +408,69 @@ export default function ProfileSettingsPage() {
           </div>
         </div>
       </form>
+
+      {/* Danger Zone */}
+      <div className="bg-dark-500 rounded-lg border border-dark-400 overflow-hidden">
+        <div className="p-6 border-b border-dark-400 bg-red-900/20">
+          <h2 className="text-xl font-semibold text-white">Danger Zone</h2>
+        </div>
+        <div className="p-6">
+          {isDeleteConfirmOpen ? (
+            <div>
+              <p className="text-red-300 font-medium mb-4">
+                This action cannot be undone. This will permanently delete your account and remove your data from our servers.
+              </p>
+              <div className="mb-4">
+                <label htmlFor="confirm-email" className="block text-sm font-medium text-gray-300 mb-2">
+                  To confirm, type your email address:
+                </label>
+                <input
+                  type="email"
+                  id="confirm-email"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  placeholder={user?.email}
+                  className="w-full px-3 py-2 bg-dark-600 border border-red-500 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent text-white"
+                />
+              </div>
+              <div className="flex space-x-3">
+                <button
+                  onClick={handleDeleteAccount}
+                  disabled={isDeleting}
+                  className={`px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md transition-colors disabled:opacity-70 ${isDeleting ? 'cursor-not-allowed' : ''}`}
+                >
+                  {isDeleting ? 'Deleting...' : 'Permanently Delete Account'}
+                </button>
+                <button
+                  onClick={() => {
+                    setIsDeleteConfirmOpen(false);
+                    setDeleteConfirmText('');
+                  }}
+                  disabled={isDeleting}
+                  className="px-4 py-2 bg-dark-400 hover:bg-dark-500 text-white rounded-md transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between">
+              <div>
+                <h3 className="text-lg font-medium text-white">Delete Account</h3>
+                <p className="text-gray-400 mt-1">
+                  Once you delete your account, there is no going back. Please be certain.
+                </p>
+              </div>
+              <button
+                onClick={() => setIsDeleteConfirmOpen(true)}
+                className="mt-4 md:mt-0 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md transition-colors"
+              >
+                Delete Account
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 } 

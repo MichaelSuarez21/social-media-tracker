@@ -128,13 +128,6 @@ export default function DashboardHeader() {
                     >
                       Profile Settings
                     </Link>
-                    <Link 
-                      href="/settings" 
-                      className="block px-4 py-2 text-sm text-gray-300 hover:bg-dark-400"
-                      onClick={() => setIsMenuOpen(false)}
-                    >
-                      Account Settings
-                    </Link>
                     <div className="border-t border-dark-400">
                       <button
                         onClick={() => {
@@ -233,17 +226,6 @@ export default function DashboardHeader() {
               onClick={() => setIsMenuOpen(false)}
             >
               Profile Settings
-            </Link>
-            <Link
-              href="/settings"
-              className={`block px-3 py-2 rounded-md text-base font-medium ${
-                isActive('/settings')
-                  ? "bg-dark-500 text-white"
-                  : "text-gray-300 hover:bg-dark-500 hover:text-white"
-              }`}
-              onClick={() => setIsMenuOpen(false)}
-            >
-              Account Settings
             </Link>
             <button
               onClick={() => {
