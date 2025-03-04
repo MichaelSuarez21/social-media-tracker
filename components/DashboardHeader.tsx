@@ -4,12 +4,14 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { useAuth } from '@/lib/auth';
+import { useExpiredAccounts } from '@/lib/useExpiredAccounts';
 
 export default function DashboardHeader() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, profile, signOut } = useAuth();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const { hasExpiredAccounts, expiredAccounts } = useExpiredAccounts();
 
   const handleLogout = async () => {
     try {
@@ -69,19 +71,14 @@ export default function DashboardHeader() {
                   isActive('/accounts')
                     ? "bg-dark-500 text-white"
                     : "text-gray-300 hover:bg-dark-500 hover:text-white"
-                }`}
+                } relative`}
               >
                 Accounts
-              </Link>
-              <Link 
-                href="/analytics" 
-                className={`px-3 py-2 rounded-md text-sm font-medium ${
-                  isActive('/analytics')
-                    ? "bg-dark-500 text-white"
-                    : "text-gray-300 hover:bg-dark-500 hover:text-white"
-                }`}
-              >
-                Analytics
+                {hasExpiredAccounts() && (
+                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
+                    {expiredAccounts.length}
+                  </span>
+                )}
               </Link>
             </nav>
           </div>
@@ -128,6 +125,20 @@ export default function DashboardHeader() {
                     >
                       Profile Settings
                     </Link>
+                    
+                    {hasExpiredAccounts() && (
+                      <Link 
+                        href="/accounts" 
+                        className="block px-4 py-2 text-sm text-red-400 hover:bg-dark-400 flex items-center"
+                        onClick={() => setIsMenuOpen(false)}
+                      >
+                        <span className="bg-red-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center mr-2">
+                          !
+                        </span>
+                        Reconnect expired accounts
+                      </Link>
+                    )}
+                    
                     <div className="border-t border-dark-400">
                       <button
                         onClick={() => {
@@ -200,21 +211,15 @@ export default function DashboardHeader() {
                 isActive('/accounts')
                   ? "bg-dark-500 text-white"
                   : "text-gray-300 hover:bg-dark-500 hover:text-white"
-              }`}
+              } relative`}
               onClick={() => setIsMenuOpen(false)}
             >
               Accounts
-            </Link>
-            <Link
-              href="/analytics"
-              className={`block px-3 py-2 rounded-md text-base font-medium ${
-                isActive('/analytics')
-                  ? "bg-dark-500 text-white"
-                  : "text-gray-300 hover:bg-dark-500 hover:text-white"
-              }`}
-              onClick={() => setIsMenuOpen(false)}
-            >
-              Analytics
+              {hasExpiredAccounts() && (
+                <span className="absolute top-1/2 -translate-y-1/2 right-3 bg-red-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
+                  {expiredAccounts.length}
+                </span>
+              )}
             </Link>
             <Link
               href="/settings/profile"

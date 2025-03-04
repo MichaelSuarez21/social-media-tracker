@@ -1,6 +1,10 @@
 import { createClientComponentClient, createServerComponentClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
+import logger from "@/lib/logger";
 
+/**
+ * Interface representing a social media account stored in the database
+ */
 export interface SocialAccount {
   id: string;
   user_id: string;
@@ -17,14 +21,21 @@ export interface SocialAccount {
   updated_at: Date;
 }
 
+/**
+ * Interface representing authentication tokens for a social media platform
+ */
 export interface SocialTokens {
   access_token: string;
   refresh_token?: string;
   token_secret?: string;
   expires_at?: Date;
   scopes?: string;
+  success?: boolean; // For indicating success of token operations
 }
 
+/**
+ * Interface representing metrics data from a social media platform
+ */
 export interface SocialMetrics {
   accountInfo: {
     username: string;
@@ -46,131 +57,405 @@ export interface SocialMetrics {
   };
 }
 
+/**
+ * Type for metrics with cache information
+ */
+export type CachedSocialMetrics = SocialMetrics & { 
+  _cache?: { 
+    fromCache: boolean; 
+    timestamp?: number;
+    expired?: boolean;
+    error?: boolean;
+  } 
+};
+
+/**
+ * Abstract base class for all social media platform implementations
+ * Defines the common interface and shared functionality
+ */
 export abstract class BasePlatform {
   readonly platform: string;
   
+  /**
+   * Creates a new platform instance
+   * @param platform The platform identifier (e.g., 'twitter', 'facebook')
+   */
   constructor(platform: string) {
     this.platform = platform;
+    logger.debug(this.platform, 'Platform initialized');
   }
 
-  // Abstract methods that platform-specific implementations must define
-  // This returns the platform's auth base URL or identifier - actual OAuth URL is built in API routes
+  /**
+   * Returns the base authentication URL for this platform
+   * @returns The base auth URL
+   */
   abstract getAuthUrl(): string;
   
-  // These methods are called from API routes
+  /**
+   * Exchanges an authorization code for access/refresh tokens
+   * @param code The authorization code from the OAuth flow
+   * @param codeVerifier Optional PKCE code verifier for OAuth 2.0 with PKCE
+   * @returns Promise resolving to the tokens
+   */
   abstract exchangeCodeForTokens(code: string, codeVerifier?: string): Promise<SocialTokens>;
+  
+  /**
+   * Refreshes expired access tokens using a refresh token
+   * @param refreshToken The refresh token
+   * @returns Promise resolving to the new tokens
+   */
   abstract refreshTokens(refreshToken: string): Promise<SocialTokens>;
-  abstract getMetrics(tokens: SocialTokens, params?: any): Promise<SocialMetrics>;
+  
+  /**
+   * Retrieves social media metrics for the authenticated user
+   * @param tokens Authentication tokens
+   * @param userId Optional user ID for caching
+   * @returns Promise resolving to the metrics data
+   */
+  abstract getMetrics(tokens: SocialTokens, userId?: string): Promise<CachedSocialMetrics>;
 
-  // Common methods for all platforms
-  async getConnectedAccount(userId: string): Promise<SocialAccount | null> {
-    const supabase = createServerComponentClient({ cookies });
+  /**
+   * Checks if a token is expired based on its expiry date
+   * @param expiresAt Expiry date (ISO string or Date object)
+   * @returns boolean indicating if the token is expired
+   */
+  isTokenExpired(expiresAt?: string | Date): boolean {
+    if (!expiresAt) return true;
     
-    const { data, error } = await supabase
-      .from('social_accounts')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('platform', this.platform)
-      .single();
+    try {
+      const expiryDate = typeof expiresAt === 'string' ? new Date(expiresAt) : expiresAt;
+      const now = new Date();
       
-    if (error || !data) {
-      console.error(`Error fetching ${this.platform} account:`, error);
-      return null;
+      // Add a buffer of 5 minutes to account for clock differences
+      const bufferMs = 5 * 60 * 1000;
+      return now.getTime() + bufferMs > expiryDate.getTime();
+    } catch (error) {
+      logger.error(this.platform, `Error checking token expiration: ${error}`);
+      return true; // Assume expired if we can't parse the date
     }
-    
-    return data as SocialAccount;
   }
   
-  async saveTokens(userId: string, tokens: SocialTokens, platformUserId: string, platformUsername: string, metadata: Record<string, any> = {}): Promise<boolean> {
-    const supabase = createServerComponentClient({ cookies });
-    
-    const accountData = {
-      user_id: userId,
-      platform: this.platform,
-      platform_user_id: platformUserId,
-      platform_username: platformUsername,
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token,
-      token_secret: tokens.token_secret,
-      expires_at: tokens.expires_at,
-      scopes: tokens.scopes,
-      metadata,
-      updated_at: new Date()
-    };
-    
-    // Upsert - insert if not exists, update if exists
-    const { error } = await supabase
-      .from('social_accounts')
-      .upsert(accountData, { 
-        onConflict: 'user_id,platform',
-        ignoreDuplicates: false 
-      });
+  /**
+   * Checks the status of a platform account tokens
+   * @param account The social account to check
+   * @returns Promise with token status: 'connected', 'expired', or 'error'
+   */
+  async checkTokenStatus(account: any): Promise<'connected' | 'expired' | 'error'> {
+    try {
+      // Check if token is expired
+      const isExpired = this.isTokenExpired(account.expires_at);
       
-    if (error) {
-      console.error(`Error saving ${this.platform} tokens:`, error);
+      // If not expired, account is connected
+      if (!isExpired) {
+        return 'connected';
+      }
+      
+      // If expired but has refresh token, try to refresh
+      if (account.refresh_token) {
+        try {
+          // Attempt to refresh the token
+          const refreshed = await this.refreshTokens(account.refresh_token);
+          
+          if (refreshed.success) {
+            return 'connected';
+          }
+        } catch (refreshError) {
+          logger.error(this.platform, `Error refreshing token: ${refreshError}`);
+        }
+      }
+      
+      // If we get here, token is expired and couldn't be refreshed
+      return 'expired';
+    } catch (error) {
+      logger.error(this.platform, `Error checking token status: ${error}`);
+      return 'error';
+    }
+  }
+
+  // Common methods for all platforms
+  /**
+   * Retrieves a connected social account for the user
+   * @param userId The user ID to look up
+   * @returns Promise resolving to the account if found, or null
+   */
+  async getConnectedAccount(userId: string): Promise<SocialAccount | null> {
+    try {
+      const supabase = createServerComponentClient({ cookies });
+      
+      logger.info(this.platform, `Getting account for user ${userId.substring(0, 8)}...`);
+      
+      // First check in the social_accounts table (new schema)
+      const { data: socialAccount, error: socialError } = await supabase
+        .from('social_accounts')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('platform', this.platform)
+        .single();
+        
+      if (socialAccount) {
+        logger.debug(this.platform, 'Found account in social_accounts table');
+        return socialAccount as SocialAccount;
+      }
+      
+      if (socialError && socialError.code !== 'PGRST116') { // PGRST116 is "no rows returned" error
+        logger.error(this.platform, `Error fetching from social_accounts: ${socialError.message}`);
+        // Fall through to legacy check
+      }
+      
+      // If not found in social_accounts, check legacy table (if it's Twitter)
+      if (this.platform === 'twitter') {
+        logger.debug(this.platform, 'Checking legacy twitter_accounts table');
+        const { data: twitterAccount, error: twitterError } = await supabase
+          .from('twitter_accounts')
+          .select('*')
+          .eq('user_id', userId)
+          .single();
+          
+        if (twitterError || !twitterAccount) {
+          logger.debug(this.platform, `No account found in twitter_accounts: ${twitterError?.message || 'No data'}`);
+          return null;
+        }
+        
+        logger.info(this.platform, 'Found account in twitter_accounts, migrating to social_accounts');
+        
+        // Found in legacy table, migrate to new table
+        const socialAccountData = {
+          user_id: twitterAccount.user_id,
+          platform: 'twitter',
+          platform_user_id: twitterAccount.twitter_user_id || '',
+          platform_username: twitterAccount.twitter_username || '',
+          access_token: twitterAccount.access_token,
+          refresh_token: twitterAccount.refresh_token,
+          expires_at: twitterAccount.expires_at,
+          scopes: twitterAccount.scopes,
+          metadata: {
+            name: twitterAccount.display_name,
+            profile_image_url: twitterAccount.profile_image_url,
+            followers_count: twitterAccount.followers_count
+          },
+          created_at: new Date(),
+          updated_at: new Date()
+        };
+        
+        // Save to new table
+        try {
+          const { data, error } = await supabase
+            .from('social_accounts')
+            .upsert(socialAccountData)
+            .select()
+            .single();
+          
+          if (error) {
+            logger.error(this.platform, `Error migrating from twitter_accounts to social_accounts: ${error.message}`);
+            // Return original Twitter account data as fallback
+            return {
+              id: twitterAccount.id,
+              user_id: twitterAccount.user_id,
+              platform: 'twitter',
+              platform_user_id: twitterAccount.twitter_user_id || '',
+              platform_username: twitterAccount.twitter_username || '',
+              access_token: twitterAccount.access_token,
+              refresh_token: twitterAccount.refresh_token,
+              token_secret: undefined,
+              expires_at: twitterAccount.expires_at,
+              scopes: twitterAccount.scopes,
+              metadata: {
+                name: twitterAccount.display_name,
+                profile_image_url: twitterAccount.profile_image_url,
+                followers_count: twitterAccount.followers_count
+              },
+              created_at: new Date(),
+              updated_at: new Date()
+            };
+          }
+          
+          logger.info(this.platform, 'Successfully migrated account to social_accounts');
+          return data as SocialAccount;
+        } catch (error: unknown) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          logger.error(this.platform, `Error in migration: ${errorMessage}`);
+          return null;
+        }
+      }
+      
+      logger.info(this.platform, 'No account found for user');
+      return null;
+    } catch (error: any) {
+      logger.error(this.platform, `Error getting account: ${error.message || String(error)}`);
+      return null;
+    }
+  }
+  
+  async saveTokens(
+    userId: string, 
+    platformUserId: string, 
+    platformUsername: string,
+    tokens: SocialTokens
+  ): Promise<boolean> {
+    try {
+      const supabase = createServerComponentClient({ cookies });
+      
+      const { error } = await supabase
+        .from('social_accounts')
+        .upsert({
+          user_id: userId,
+          platform: this.platform,
+          platform_user_id: platformUserId,
+          platform_username: platformUsername,
+          access_token: tokens.access_token,
+          refresh_token: tokens.refresh_token,
+          token_secret: tokens.token_secret,
+          expires_at: tokens.expires_at,
+          scopes: tokens.scopes,
+          updated_at: new Date()
+        })
+        .select();
+        
+      if (error) {
+        logger.error(this.platform, `Error saving ${this.platform} tokens: ${error.message || String(error)}`);
+        return false;
+      }
+      
+      return true;
+    } catch (error: any) {
+      logger.error(this.platform, `Error saving ${this.platform} tokens: ${error.message || String(error)}`);
       return false;
     }
-    
-    return true;
   }
   
   async disconnectAccount(userId: string): Promise<boolean> {
-    const supabase = createServerComponentClient({ cookies });
-    
-    const { error } = await supabase
-      .from('social_accounts')
-      .delete()
-      .eq('user_id', userId)
-      .eq('platform', this.platform);
+    try {
+      const supabase = createServerComponentClient({ cookies });
+        
+      const { error } = await supabase
+        .from('social_accounts')
+        .delete()
+        .eq('user_id', userId)
+        .eq('platform', this.platform);
+        
+      if (error) {
+        logger.error(this.platform, `Error disconnecting ${this.platform} account: ${error.message || String(error)}`);
+        return false;
+      }
       
-    if (error) {
-      console.error(`Error disconnecting ${this.platform} account:`, error);
+      logger.info(this.platform, `Successfully disconnected account for user ${userId.substring(0, 8)}...`);
+      return true;
+    } catch (error: any) {
+      logger.error(this.platform, `Error disconnecting account: ${error.message || String(error)}`);
       return false;
     }
-    
-    return true;
-  }
-  
-  // Helper methods for token management
-  isTokenExpired(expiresAt?: Date): boolean {
-    if (!expiresAt) return false;
-    // Consider tokens expired 5 minutes before actual expiry to avoid edge cases
-    return new Date(expiresAt).getTime() < (Date.now() + 5 * 60 * 1000);
   }
   
   async ensureValidTokens(userId: string): Promise<SocialTokens | null> {
-    const account = await this.getConnectedAccount(userId);
-    if (!account) return null;
+    logger.info(this.platform, `Ensuring valid tokens for user ${userId.substring(0, 8)}...`);
     
-    const tokens: SocialTokens = {
-      access_token: account.access_token,
-      refresh_token: account.refresh_token,
-      token_secret: account.token_secret,
-      expires_at: account.expires_at,
-      scopes: account.scopes
-    };
-    
-    // Check if token is expired and we have a refresh token
-    if (this.isTokenExpired(account.expires_at) && account.refresh_token) {
-      try {
-        const newTokens = await this.refreshTokens(account.refresh_token);
-        
-        // Save the new tokens
-        await this.saveTokens(
-          userId, 
-          newTokens, 
-          account.platform_user_id, 
-          account.platform_username,
-          account.metadata
-        );
-        
-        return newTokens;
-      } catch (error) {
-        console.error(`Failed to refresh ${this.platform} tokens:`, error);
+    try {
+      const account = await this.getConnectedAccount(userId);
+      
+      if (!account) {
+        logger.info(this.platform, `No connected account found for user ${userId.substring(0, 8)}`);
         return null;
       }
+      
+      logger.info(this.platform, `Found connected account: ${account.platform_username}`);
+      
+      // Ensure expires_at is a proper Date object
+      if (account.expires_at && !(account.expires_at instanceof Date)) {
+        try {
+          // Try to convert the string to a Date object
+          account.expires_at = new Date(account.expires_at);
+          logger.info(this.platform, 'Converted expires_at string to Date');
+        } catch (err: any) {
+          logger.error(this.platform, `Could not convert expires_at to Date: ${err.message || String(err)}`);
+          account.expires_at = undefined; // Set to undefined if conversion fails
+        }
+      }
+      
+      // Log detailed account info for debugging
+      logger.info(this.platform, 'Account data:', {
+        id: account.id,
+        platform: account.platform,
+        username: account.platform_username,
+        hasAccessToken: !!account.access_token,
+        hasRefreshToken: !!account.refresh_token,
+        expiresAt: account.expires_at instanceof Date ? account.expires_at.toISOString() : account.expires_at
+      });
+      
+      // Check if we have a valid access token
+      if (!account.access_token) {
+        logger.error(this.platform, 'Account missing access token');
+        return null;
+      }
+      
+      // Check if token is expired
+      const isExpired = this.isTokenExpired(account.expires_at);
+      logger.info(this.platform, `Token is expired: ${isExpired}`);
+      
+      if (isExpired) {
+        // Token is expired, try to refresh it
+        if (!account.refresh_token) {
+          // No refresh token, can't refresh
+          logger.error(this.platform, 'Token expired but no refresh token available');
+          return null;
+        }
+        
+        // Verify refresh token is valid
+        if (typeof account.refresh_token !== 'string' || account.refresh_token.trim() === '') {
+          logger.error(this.platform, 'Invalid refresh token format');
+          return null;
+        }
+        
+        try {
+          logger.info(this.platform, 'Refreshing expired token');
+          
+          // Refresh the token
+          const newTokens = await this.refreshTokens(account.refresh_token);
+          
+          logger.info(this.platform, 'Token refreshed successfully');
+          
+          // Update the tokens in the database
+          const updated = await this.saveTokens(
+            userId, 
+            account.platform_user_id, 
+            account.platform_username,
+            newTokens
+          );
+          
+          if (updated) {
+            logger.info(this.platform, 'Updated tokens in database');
+          } else {
+            logger.warn(this.platform, 'Failed to update tokens in database');
+          }
+          
+          return newTokens;
+        } catch (error: any) {
+          // Failed to refresh token
+          logger.error(this.platform, `Failed to refresh token: ${error.message || String(error)}`);
+          
+          // If the token refresh fails, we should consider disconnecting the account
+          // to prevent continuous failed refresh attempts
+          logger.info(this.platform, 'Consider disconnecting this account due to refresh failures');
+          
+          return null;
+        }
+      }
+      
+      // For debugging - log partial token info
+      if (account.access_token) {
+        logger.info(this.platform, `Using existing valid token: ${account.access_token.substring(0, 10)}...`);
+      }
+      
+      // Token is still valid
+      return {
+        access_token: account.access_token,
+        refresh_token: account.refresh_token,
+        token_secret: account.token_secret,
+        expires_at: account.expires_at,
+        scopes: account.scopes,
+      };
+    } catch (error: any) {
+      logger.error(this.platform, `Error ensuring valid tokens: ${error.message || String(error)}`);
+      return null;
     }
-    
-    return tokens;
   }
 } 

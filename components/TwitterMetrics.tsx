@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { FaTwitter, FaSync, FaEye, FaRetweet, FaHeart, FaComment } from 'react-icons/fa';
+import { useState, useEffect, useCallback } from 'react';
+import { FaTwitter, FaSync, FaEye, FaRetweet, FaHeart, FaComment, FaLink, FaUser, FaImage, FaChartBar, FaExpand } from 'react-icons/fa';
 
 interface Tweet {
   id: string;
@@ -26,6 +26,21 @@ interface Tweet {
     reply_count: number;
     like_count: number;
   };
+  // Enhanced metrics from historical data
+  metrics?: {
+    impressions: number;
+    retweets: number;
+    replies: number;
+    likes: number;
+    quotes: number;
+    engagements?: number;
+    profileVisits?: number;
+    linkClicks?: number;
+    mediaViews?: number;
+    mediaEngagements?: number;
+    detailExpands?: number;
+    userProfileClicks?: number;
+  };
 }
 
 interface TwitterMetricsProps {
@@ -38,13 +53,13 @@ export default function TwitterMetrics({ userId }: TwitterMetricsProps) {
   const [error, setError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
 
-  // Function to fetch Twitter metrics
-  const fetchMetrics = async () => {
+  // Function to fetch Twitter metrics with useCallback to prevent recreation
+  const fetchMetrics = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     
     try {
-      const response = await fetch('/api/twitter/metrics');
+      const response = await fetch('/api/social/twitter/metrics');
       
       if (!response.ok) {
         const errorData = await response.json();
@@ -68,6 +83,21 @@ export default function TwitterMetrics({ userId }: TwitterMetricsProps) {
       if (data.data && Array.isArray(data.data)) {
         setTweets(data.data);
         setIsConnected(true);
+      } else if (data.posts && Array.isArray(data.posts)) {
+        // Handle the new format where data is in the posts field
+        setTweets(data.posts.map((post: any) => ({
+          id: post.id,
+          text: post.text,
+          created_at: post.createdAt,
+          public_metrics: {
+            retweet_count: post.metrics.retweets || 0,
+            reply_count: post.metrics.replies || 0,
+            like_count: post.metrics.likes || 0,
+            quote_count: post.metrics.quotes || 0,
+          },
+          metrics: post.metrics
+        })));
+        setIsConnected(true);
       } else {
         setTweets([]);
         setError('No tweets found');
@@ -79,12 +109,26 @@ export default function TwitterMetrics({ userId }: TwitterMetricsProps) {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);  // Empty dependency array since it doesn't depend on props/state
 
   // Fetch metrics on component mount
   useEffect(() => {
     fetchMetrics();
-  }, [userId]);
+    
+    // Add visibility change listener to handle tab switching
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        // Refetch data when tab becomes visible again
+        fetchMetrics();
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [fetchMetrics]);  // Include fetchMetrics in dependency array
 
   // Format date for display
   const formatDate = (dateString: string) => {
@@ -94,6 +138,28 @@ export default function TwitterMetrics({ userId }: TwitterMetricsProps) {
       day: 'numeric',
       year: 'numeric',
     }).format(date);
+  };
+
+  // Calculate engagement rate
+  const calculateEngagementRate = (tweet: Tweet) => {
+    // If we have the engagements value from the historical metrics, use it
+    if (tweet.metrics?.engagements && tweet.metrics?.impressions) {
+      return ((tweet.metrics.engagements / tweet.metrics.impressions) * 100).toFixed(2);
+    }
+    
+    // Fall back to calculating from public metrics
+    const impressions = tweet.metrics?.impressions || 
+                        tweet.non_public_metrics?.impression_count || 
+                        tweet.organic_metrics?.impression_count || 0;
+    
+    if (impressions === 0) return '0.00';
+    
+    const interactions = (tweet.public_metrics.like_count || 0) + 
+                        (tweet.public_metrics.retweet_count || 0) + 
+                        (tweet.public_metrics.reply_count || 0) + 
+                        (tweet.public_metrics.quote_count || 0);
+    
+    return ((interactions / impressions) * 100).toFixed(2);
   };
 
   // If Twitter is not connected
@@ -151,36 +217,121 @@ export default function TwitterMetrics({ userId }: TwitterMetricsProps) {
           <p className="text-gray-400">No tweets found</p>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-6">
           {tweets.map((tweet) => (
-            <div key={tweet.id} className="border-b border-dark-400 pb-4 last:border-0">
-              <p className="mb-2">{tweet.text}</p>
-              <div className="flex justify-between items-center text-sm text-gray-400">
-                <span>{formatDate(tweet.created_at)}</span>
-                
-                <div className="flex space-x-4">
-                  {tweet.non_public_metrics?.impression_count !== undefined && (
-                    <div className="flex items-center" title="Impressions">
-                      <FaEye className="mr-1" />
-                      {tweet.non_public_metrics.impression_count.toLocaleString()}
-                    </div>
-                  )}
-                  
-                  <div className="flex items-center" title="Retweets">
-                    <FaRetweet className="mr-1" />
-                    {tweet.public_metrics.retweet_count.toLocaleString()}
-                  </div>
-                  
-                  <div className="flex items-center" title="Likes">
-                    <FaHeart className="mr-1" />
-                    {tweet.public_metrics.like_count.toLocaleString()}
-                  </div>
-                  
-                  <div className="flex items-center" title="Replies">
-                    <FaComment className="mr-1" />
-                    {tweet.public_metrics.reply_count.toLocaleString()}
-                  </div>
+            <div key={tweet.id} className="border border-dark-400 rounded-lg p-4 hover:border-blue-500 transition-colors">
+              <p className="mb-3 text-white">{tweet.text}</p>
+              
+              <div className="text-sm text-gray-400 mb-3">
+                {formatDate(tweet.created_at)}
+              </div>
+              
+              {/* Primary metrics in a grid layout */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+                <div className="bg-dark-600 p-3 rounded-lg flex flex-col items-center">
+                  <FaEye className="text-blue-400 mb-1" />
+                  <span className="font-bold text-white">
+                    {(tweet.metrics?.impressions || 
+                     tweet.non_public_metrics?.impression_count || 
+                     tweet.organic_metrics?.impression_count || 0).toLocaleString()}
+                  </span>
+                  <span className="text-xs text-gray-400">Impressions</span>
                 </div>
+                
+                <div className="bg-dark-600 p-3 rounded-lg flex flex-col items-center">
+                  <FaChartBar className="text-green-400 mb-1" />
+                  <span className="font-bold text-white">{calculateEngagementRate(tweet)}%</span>
+                  <span className="text-xs text-gray-400">Engagement</span>
+                </div>
+                
+                <div className="bg-dark-600 p-3 rounded-lg flex flex-col items-center">
+                  <FaHeart className="text-red-400 mb-1" />
+                  <span className="font-bold text-white">
+                    {(tweet.public_metrics.like_count || 0).toLocaleString()}
+                  </span>
+                  <span className="text-xs text-gray-400">Likes</span>
+                </div>
+                
+                <div className="bg-dark-600 p-3 rounded-lg flex flex-col items-center">
+                  <FaRetweet className="text-green-400 mb-1" />
+                  <span className="font-bold text-white">
+                    {(tweet.public_metrics.retweet_count || 0).toLocaleString()}
+                  </span>
+                  <span className="text-xs text-gray-400">Retweets</span>
+                </div>
+              </div>
+              
+              {/* Secondary metrics in a more compact layout */}
+              <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+                <div className="bg-dark-600 p-2 rounded-lg flex flex-col items-center">
+                  <FaComment className="text-yellow-400 mb-1 text-sm" />
+                  <span className="font-bold text-white text-sm">
+                    {(tweet.public_metrics.reply_count || 0).toLocaleString()}
+                  </span>
+                  <span className="text-xs text-gray-400">Replies</span>
+                </div>
+                
+                {tweet.metrics?.profileVisits !== undefined && (
+                  <div className="bg-dark-600 p-2 rounded-lg flex flex-col items-center">
+                    <FaUser className="text-purple-400 mb-1 text-sm" />
+                    <span className="font-bold text-white text-sm">
+                      {tweet.metrics.profileVisits.toLocaleString()}
+                    </span>
+                    <span className="text-xs text-gray-400">Profile Visits</span>
+                  </div>
+                )}
+                
+                {tweet.metrics?.linkClicks !== undefined && (
+                  <div className="bg-dark-600 p-2 rounded-lg flex flex-col items-center">
+                    <FaLink className="text-blue-400 mb-1 text-sm" />
+                    <span className="font-bold text-white text-sm">
+                      {tweet.metrics.linkClicks.toLocaleString()}
+                    </span>
+                    <span className="text-xs text-gray-400">Link Clicks</span>
+                  </div>
+                )}
+                
+                {tweet.metrics?.mediaViews !== undefined && (
+                  <div className="bg-dark-600 p-2 rounded-lg flex flex-col items-center">
+                    <FaImage className="text-green-400 mb-1 text-sm" />
+                    <span className="font-bold text-white text-sm">
+                      {tweet.metrics.mediaViews.toLocaleString()}
+                    </span>
+                    <span className="text-xs text-gray-400">Media Views</span>
+                  </div>
+                )}
+                
+                {tweet.metrics?.detailExpands !== undefined && (
+                  <div className="bg-dark-600 p-2 rounded-lg flex flex-col items-center">
+                    <FaExpand className="text-yellow-400 mb-1 text-sm" />
+                    <span className="font-bold text-white text-sm">
+                      {tweet.metrics.detailExpands.toLocaleString()}
+                    </span>
+                    <span className="text-xs text-gray-400">Expands</span>
+                  </div>
+                )}
+                
+                {tweet.public_metrics.quote_count > 0 && (
+                  <div className="bg-dark-600 p-2 rounded-lg flex flex-col items-center">
+                    <FaTwitter className="text-blue-400 mb-1 text-sm" />
+                    <span className="font-bold text-white text-sm">
+                      {tweet.public_metrics.quote_count.toLocaleString()}
+                    </span>
+                    <span className="text-xs text-gray-400">Quotes</span>
+                  </div>
+                )}
+              </div>
+              
+              {/* View on Twitter link */}
+              <div className="mt-3 text-right">
+                <a 
+                  href={`https://twitter.com/i/web/status/${tweet.id}`}
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-blue-400 hover:text-blue-300 text-sm"
+                >
+                  View on Twitter
+                </a>
               </div>
             </div>
           ))}

@@ -1,7 +1,8 @@
 'use client';
+import React from 'react';
 import AuthGuard from '@/components/AuthGuard';
 import EnsureProfile from '@/components/EnsureProfile';
-import { usePathname } from 'next/navigation';
+import { ToastProvider } from '@/components/ui/Toast';
 import logger from '@/lib/logger';
 
 export default function AuthenticatedLayout({
@@ -9,18 +10,19 @@ export default function AuthenticatedLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const pathname = usePathname();
-  logger.debug('AuthenticatedLayout', 'Rendering for path:', pathname);
-
+  logger.debug('Layout', 'Authenticated layout rendered');
+  
   return (
-    <AuthGuard>
-      <EnsureProfile>
-        <div className="min-h-screen bg-dark-600">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-            {children}
+    <ToastProvider>
+      <AuthGuard>
+        <EnsureProfile>
+          <div className="min-h-screen bg-dark-700">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+              {children}
+            </div>
           </div>
-        </div>
-      </EnsureProfile>
-    </AuthGuard>
+        </EnsureProfile>
+      </AuthGuard>
+    </ToastProvider>
   );
 } 

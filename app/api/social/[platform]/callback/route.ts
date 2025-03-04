@@ -37,7 +37,7 @@ export async function GET(
     console.log(`OAuth callback received for platform: ${platform}`);
     console.log('Full callback URL:', request.url);
     
-    const { searchParams } = request.nextUrl;
+    const { searchParams } = new URL(request.url);
     
     // Check if the platform is supported
     if (!platforms[platform as keyof typeof platforms]) {
@@ -74,8 +74,7 @@ export async function GET(
     });
     
     // Get the current authenticated user
-    const cookieStore = cookies();
-    const supabase = createServerComponentClient({ cookies: () => cookieStore });
+    const supabase = createServerComponentClient({ cookies });
     
     // For debugging, check auth cookies
     console.log('Checking auth cookies...');

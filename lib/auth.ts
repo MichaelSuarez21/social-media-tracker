@@ -2,10 +2,14 @@
 
 import { createContext, useContext, useEffect, useState, createElement } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-import type { Session, User, AuthChangeEvent } from '@supabase/supabase-js';
+import type { Session, User, AuthChangeEvent, AuthError } from '@supabase/supabase-js';
+import logger from './logger';
+import type { PostgrestError } from '@supabase/supabase-js';
 
-// Define types for user profile
-interface UserProfile {
+/**
+ * Interface defining the structure of a user profile
+ */
+export interface UserProfile {
   id: string;
   full_name: string;
   avatar_url?: string;
@@ -14,17 +18,29 @@ interface UserProfile {
   updated_at: string;
 }
 
-// Enhanced auth context type with profile
-type AuthContextType = {
+/**
+ * Type for the authentication context that's provided throughout the app
+ */
+export type AuthContextType = {
+  /** The current authenticated user from Supabase */
   user: User | null;
+  /** The user's profile data from the profiles table */
   profile: UserProfile | null;
+  /** The current authenticated session */
   session: Session | null;
+  /** Whether authentication state is still loading */
   isLoading: boolean;
-  signIn: (email: string, password: string) => Promise<any>;
-  signUp: (email: string, password: string, metadata?: { full_name: string }) => Promise<any>;
-  signInWithProvider: (provider: string) => Promise<any>;
-  signOut: () => Promise<any>;
-  updateProfile: (data: Partial<UserProfile>) => Promise<any>;
+  /** Function to sign in with email and password */
+  signIn: (email: string, password: string) => Promise<{data: any, error: AuthError | null}>;
+  /** Function to sign up with email and password */
+  signUp: (email: string, password: string, metadata?: { full_name: string }) => Promise<{data: any, error: Error | null}>;
+  /** Function to sign in with a third-party provider */
+  signInWithProvider: (provider: string) => Promise<{data: any, error: Error | null}>;
+  /** Function to sign out the current user */
+  signOut: () => Promise<{error: Error | null}>;
+  /** Function to update the user's profile */
+  updateProfile: (data: Partial<UserProfile>) => Promise<{data: UserProfile | null, error: Error | null}>;
+  /** Function to refresh the user's profile data */
   refreshProfile: () => Promise<UserProfile | null>;
 };
 
@@ -34,11 +50,11 @@ const AuthContext = createContext<AuthContextType>({
   profile: null,
   session: null,
   isLoading: true,
-  signIn: () => Promise.resolve(),
-  signUp: () => Promise.resolve(),
-  signInWithProvider: () => Promise.resolve(),
-  signOut: () => Promise.resolve(),
-  updateProfile: () => Promise.resolve(),
+  signIn: () => Promise.resolve({data: null, error: null}),
+  signUp: () => Promise.resolve({data: null, error: null}),
+  signInWithProvider: () => Promise.resolve({data: null, error: null}),
+  signOut: () => Promise.resolve({error: null}),
+  updateProfile: () => Promise.resolve({data: null, error: null}),
   refreshProfile: () => Promise.resolve(null),
 });
 
@@ -54,17 +70,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   
   // Add logging to track state changes
   useEffect(() => {
-    console.log('Auth state changed:', { 
-      hasUser: !!user, 
-      hasProfile: !!profile, 
-      hasSession: !!session, 
-      isLoading 
-    });
+    logger.info('auth', `Auth state changed: User: ${!!user}, Profile: ${!!profile}, Session: ${!!session}, Loading: ${isLoading}`);
   }, [user, profile, session, isLoading]);
 
   // Force an initialization of the session from local storage token
   const forceInitializeSession = async () => {
-    console.log('Manually initializing session from token...');
+    logger.info('Auth', 'Manually initializing session from token...');
     
     try {
       // Check if there's a token in localStorage first
@@ -72,12 +83,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const hasToken = typeof window !== 'undefined' && 
         localStorage.getItem('supabase.auth.token') !== null;
         
-      console.log('Token in localStorage:', hasToken);
+      logger.info('Auth', 'Token in localStorage:', hasToken);
       
       if (hasToken) {
         // Refresh session to ensure it's valid
         const { data, error } = await supabase.auth.refreshSession();
-        console.log('Session refresh result:', { 
+        logger.info('Auth', 'Session refresh result:', { 
           success: !!data.session, 
           error: error?.message || 'none',
           user: data.session?.user?.id || 'none'
@@ -88,7 +99,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(data.session.user);
           
           // Try to load profile
-          console.log('Loading profile after manual session init');
+          logger.info('Auth', 'Loading profile after manual session init');
           const { data: profileData, error: profileError } = await supabase
             .from('profiles')
             .select('*')
@@ -96,9 +107,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             .single();
             
           if (profileError) {
-            console.error('Error loading profile during manual init:', profileError);
+            logger.error('Auth', 'Error loading profile during manual init:', profileError.message);
           } else if (profileData) {
-            console.log('Profile loaded successfully during manual init');
+            logger.info('Auth', 'Profile loaded successfully during manual init');
             setProfile(profileData as UserProfile);
           }
           
@@ -107,7 +118,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       return false;
     } catch (err) {
-      console.error('Error in manual session initialization:', err);
+      logger.error('Auth', 'Error in manual session initialization:', err instanceof Error ? err.message : String(err));
       return false;
     }
   };
@@ -115,11 +126,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Fetch the user's profile from Supabase
   const fetchProfile = async (userId: string) => {
     if (!userId) {
-      console.error('fetchProfile: No user ID provided');
+      logger.error('Auth', 'fetchProfile: No user ID provided');
       return null;
     }
 
-    console.log(`fetchProfile: Fetching profile for user ${userId}`);
+    logger.info('Auth', `fetchProfile: Fetching profile for user ${userId}`);
     const supabase = createClientComponentClient();
     
     try {
@@ -132,7 +143,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         
       if (error) {
         if (error.code === 'PGRST116') {
-          console.log(`fetchProfile: No profile found for user ${userId}, creating one`);
+          logger.info('Auth', `fetchProfile: No profile found for user ${userId}, creating one`);
           
           // Get user data to help with profile creation
           const { data: userData } = await supabase.auth.getUser();
@@ -148,7 +159,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             updated_at: new Date().toISOString(),
           };
           
-          console.log(`fetchProfile: Creating profile with data:`, newProfile);
+          logger.info('Auth', `fetchProfile: Creating profile with data:`, newProfile);
           
           // Insert the new profile - convert undefined to null for the database
           const { data: createdProfile, error: createError } = await supabase
@@ -158,36 +169,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             .single();
             
           if (createError) {
-            console.error(`fetchProfile: Failed to create profile`, createError);
+            logger.error('Auth', `fetchProfile: Failed to create profile`, createError.message);
             return null;
           }
           
-          console.log(`fetchProfile: Successfully created profile`, createdProfile);
+          logger.info('Auth', `fetchProfile: Successfully created profile`, createdProfile);
           return createdProfile as UserProfile;
         }
         
-        console.error(`fetchProfile: Error fetching profile for user ${userId}:`, error);
+        logger.error('Auth', `fetchProfile: Error fetching profile for user ${userId}:`, error.message);
         return null;
       }
       
-      console.log(`fetchProfile: Successfully retrieved profile for user ${userId}:`, data);
+      logger.info('Auth', `fetchProfile: Successfully retrieved profile for user ${userId}:`, data);
       return data as UserProfile;
     } catch (error) {
-      console.error(`fetchProfile: Exception fetching profile for user ${userId}:`, error);
+      logger.error('Auth', `fetchProfile: Exception fetching profile for user ${userId}:`, error instanceof Error ? error.message : String(error));
       return null;
     }
   };
 
   // Add a direct refresh function that can be called anywhere in the app
   const refreshProfile = async () => {
-    console.log('Manual profile refresh requested');
+    logger.info('Auth', 'Manual profile refresh requested');
     if (!user) {
-      console.warn('Cannot refresh profile: No user logged in');
+      logger.warn('Auth', 'Cannot refresh profile: No user logged in');
       return null;
     }
     
     try {
-      // Force a fresh fetch from the database
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
@@ -195,38 +205,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .single();
         
       if (error) {
-        console.error('Error refreshing profile:', error);
+        logger.error('Auth', 'Error refreshing profile:', error.message);
         throw error;
       }
       
-      console.log('Profile refreshed successfully:', data);
+      logger.info('Auth', 'Profile refreshed successfully');
       setProfile(data);
       return data;
     } catch (error) {
-      console.error('Failed to refresh profile:', error);
+      logger.error('Auth', 'Failed to refresh profile:', error instanceof Error ? error.message : String(error));
       throw error;
     }
   };
 
   // Fetch the current session and set user/profile states
   const getSession = async () => {
-    console.log('******** Starting session check - detailed diagnostics ********');
+    logger.info('Auth', '******** Starting session check - detailed diagnostics ********');
     setIsLoading(true);
     
     try {
       // Fetch the session from Supabase
-      console.log('Fetching session from Supabase');
+      logger.info('Auth', 'Fetching session from Supabase');
       const { data: { session: newSession }, error } = await supabase.auth.getSession();
       
-      console.log('Session check result:', { 
+      logger.info('Auth', 'Session check result:', { 
         hasSession: !!newSession,
         hasUser: newSession?.user ? 'yes' : 'no',
         userId: newSession?.user?.id || 'none',
-        error: error ? error.message : 'none' 
       });
       
       if (error) {
-        console.error('Error fetching session:', error);
+        logger.error('Auth', 'Error fetching session:', error.message);
         setIsLoading(false);
         return null;
       }
@@ -235,11 +244,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(newSession);
       
       if (newSession?.user) {
-        console.log(`User authenticated: ${newSession.user.id} (${newSession.user.email})`);
+        logger.info('Auth', `User authenticated: ${newSession.user.id} (${newSession.user.email})`);
         setUser(newSession.user);
         
         // Direct fetch from profiles table
-        console.log(`Directly checking profiles table for user: ${newSession.user.id}`);
+        logger.info('Auth', `Directly checking profiles table for user: ${newSession.user.id}`);
         try {
           const { data: profileData, error: profileError } = await supabase
             .from('profiles')
@@ -248,9 +257,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             .single();
             
           if (profileError) {
-            console.error(`Error fetching profile directly: ${profileError.message}`);
+            logger.error('Auth', `Error fetching profile directly: ${profileError.message}`);
             if (profileError.code === 'PGRST116') {
-              console.log('Profile not found, will create one');
+              logger.info('Auth', 'Profile not found, will create one');
               // Create a new profile
               const newProfile = {
                 id: newSession.user.id,
@@ -261,7 +270,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 updated_at: new Date().toISOString(),
               };
               
-              console.log('Creating profile with data:', newProfile);
+              logger.info('Auth', 'Creating profile with data:', newProfile);
               
               const { data: createdProfile, error: createError } = await supabase
                 .from('profiles')
@@ -270,31 +279,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 .single();
                 
               if (createError) {
-                console.error('Failed to create profile:', createError);
+                logger.error('Auth', 'Failed to create profile:', createError.message);
               } else if (createdProfile) {
-                console.log('Profile created successfully:', createdProfile);
+                logger.info('Auth', 'Profile created successfully:', createdProfile);
                 setProfile(createdProfile as UserProfile);
               }
             }
           } else if (profileData) {
-            console.log('Found existing profile:', profileData);
+            logger.info('Auth', 'Found existing profile:', profileData);
             setProfile(profileData as UserProfile);
           }
         } catch (err) {
-          console.error('Exception fetching/creating profile:', err);
+          logger.error('Auth', 'Exception fetching/creating profile:', err instanceof Error ? err.message : String(err));
         }
       } else {
         // No user in session, clear user and profile states
-        console.log('No user in session, clearing user and profile states');
+        logger.info('Auth', 'No user in session, clearing user and profile states');
         setUser(null);
         setProfile(null);
       }
       
-      console.log('******** Session check complete ********');
+      logger.info('Auth', '******** Session check complete ********');
       setIsLoading(false);
       return newSession;
     } catch (err) {
-      console.error('Exception during session check:', err);
+      logger.error('Auth', 'Exception during session check:', err instanceof Error ? err.message : String(err));
       setIsLoading(false);
       return null;
     }
@@ -303,30 +312,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Initialize auth on mount
   useEffect(() => {
     const initializeAuth = async () => {
-      console.log('Initializing auth state...');
+      logger.info('Auth', 'Initializing auth state...');
       try {
         // First try standard session retrieval
         const session = await getSession();
         
         // If that doesn't work, try manual initialization
         if (!session) {
-          console.log('Standard session retrieval failed, attempting manual initialization');
+          logger.info('Auth', 'Standard session retrieval failed, attempting manual initialization');
           await forceInitializeSession();
         }
         
-        // Set up auth change listener
+        // Subscribe to auth state changes
+        logger.info('Auth', 'Setting up auth state change subscription');
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
           async (event, newSession) => {
-            console.log('Auth state changed:', event, newSession?.user?.id || 'no user');
+            logger.info('Auth', 'Auth state changed:', event, newSession?.user?.id || 'no user');
             
             // Update session/user state
             setSession(newSession);
             setUser(newSession?.user || null);
             
-            // Load profile if session exists
             if (newSession?.user) {
               try {
-                console.log('Loading profile after auth change');
+                logger.info('Auth', 'Loading profile after auth change');
                 const { data: profileData, error: profileError } = await supabase
                   .from('profiles')
                   .select('*')
@@ -334,29 +343,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   .single();
                   
                 if (profileError) {
-                  console.error('Error loading profile after auth change:', profileError);
+                  logger.error('Auth', 'Error loading profile after auth change:', profileError.message);
                   setProfile(null);
                 } else if (profileData) {
-                  console.log('Profile loaded successfully after auth change');
+                  logger.info('Auth', 'Profile loaded successfully after auth change');
                   setProfile(profileData as UserProfile);
                 }
               } catch (err) {
-                console.error('Exception loading profile after auth change:', err);
+                logger.error('Auth', 'Exception loading profile after auth change:', err instanceof Error ? err.message : String(err));
                 setProfile(null);
               }
             } else {
+              // Clear profile if no user
               setProfile(null);
             }
-            
-            setIsLoading(false);
           }
         );
 
+        // Cleanup subscription
         return () => {
           subscription.unsubscribe();
         };
       } catch (error) {
-        console.error('Error in auth initialization:', error);
+        logger.error('Auth', 'Error in auth initialization:', error instanceof Error ? error.message : String(error));
         setIsLoading(false);
       }
     };
@@ -378,7 +387,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Sign up with email and password
   const signUp = async (email: string, password: string, metadata?: { full_name: string }) => {
     try {
-      console.log('Starting signup process...');
+      logger.info('Auth', 'Starting signup process...');
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
@@ -387,14 +396,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         },
       });
       
-      console.log('Auth signup result:', { user: authData?.user?.id, error: authError?.message });
+      logger.info('Auth', 'Auth signup result:', { user: authData?.user?.id, error: authError?.message });
       
       if (authError) throw authError;
 
-      // If signup successful and we have user data, create profile
+      // If signup was successful, create a profile
       if (authData?.user) {
         try {
-          console.log('Creating profile for new user:', authData.user.id);
+          logger.info('Auth', 'Creating profile for new user:', authData.user.id);
           
           // Create profile with retries
           const createProfileWithRetry = async (retries = 3) => {
@@ -423,31 +432,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 .select();
                 
               if (profileError) {
-                console.error('Profile creation error:', profileError);
+                logger.error('Auth', 'Profile creation error:', profileError.message);
                 if (retries > 0) {
-                  console.log(`Retrying profile creation (${retries} attempts left)...`);
+                  logger.info('Auth', `Retrying profile creation (${retries} attempts left)...`);
                   await new Promise(resolve => setTimeout(resolve, 500));
                   return createProfileWithRetry(retries - 1);
                 }
-                throw profileError;
+                return null;
               }
               
-              console.log('Profile created successfully:', profile);
+              logger.info('Auth', 'Profile created successfully:', profile);
               return profile;
             } catch (error) {
               if (retries > 0) {
-                console.log(`Retrying profile creation (${retries} attempts left)...`);
+                logger.info('Auth', `Retrying profile creation (${retries} attempts left)...`);
                 await new Promise(resolve => setTimeout(resolve, 500));
                 return createProfileWithRetry(retries - 1);
               }
-              throw error;
+              return null;
             }
           };
           
-          // Execute the profile creation with retries
           await createProfileWithRetry();
         } catch (profileError) {
-          console.error('Failed to create profile after multiple attempts:', profileError);
+          logger.error('Auth', 'Failed to create profile after multiple attempts:', profileError instanceof Error ? profileError.message : String(profileError));
           // Continue with auth flow even if profile creation fails
           // We'll try to create it again when user signs in
         }
@@ -455,7 +463,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       return authData;
     } catch (error) {
-      console.error('Signup error:', error);
+      logger.error('Auth', 'Signup error:', error instanceof Error ? error.message : String(error));
       throw error;
     }
   };
@@ -478,18 +486,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
   
   // Sign out
-  const signOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
-    setProfile(null);
+  const signOut = async (): Promise<{error: Error | null}> => {
+    try {
+      // Sign out of Supabase
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        logger.error('Auth', 'Error signing out:', error.message);
+        return { error };
+      }
+      return { error: null };
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      logger.error('Auth', 'Exception during sign out:', error.message);
+      return { error };
+    }
   };
 
   // Update user profile
   const updateProfile = async (data: Partial<UserProfile>) => {
-    console.log('Updating profile with data:', data);
+    logger.info('Auth', 'Updating profile with data');
     
     if (!user) {
-      console.error('Cannot update profile: No user logged in');
+      logger.error('Auth', 'Cannot update profile: No user logged in');
       throw new Error('You must be logged in to update your profile');
     }
     
@@ -502,94 +520,110 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .single();
         
       if (fetchError && fetchError.code === 'PGRST116') {
-        console.log('Profile does not exist, creating new profile for user:', user.id);
+        logger.info('Auth', 'Profile does not exist, creating new profile for user:', user.id);
         
         // Create a new profile with the provided data and default values
         const newProfile: Partial<UserProfile> = {
           id: user.id,
-          full_name: user.user_metadata.full_name || user.email?.split('@')[0] || '',
-          avatar_url: user.user_metadata.avatar_url,
-          ...data, // Include the updates
+          full_name: data.full_name || user.email?.split('@')[0] || 'User',
+          avatar_url: data.avatar_url,
+          timezone: data.timezone || 'UTC',
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };
         
-        console.log('Creating new profile with data:', newProfile);
+        logger.info('Auth', 'Creating new profile with data');
         
         // Insert the new profile
         const { data: createdProfile, error: insertError } = await supabase
           .from('profiles')
-          .insert([newProfile])
-          .select('*')
+          .insert(newProfile)
+          .select()
           .single();
           
         if (insertError) {
-          console.error('Error creating profile:', insertError);
+          logger.error('Auth', 'Error creating profile:', insertError.message);
           throw insertError;
         }
         
-        console.log('New profile created during update:', createdProfile);
+        logger.info('Auth', 'New profile created during update');
         setProfile(createdProfile);
         return createdProfile;
       } else if (fetchError) {
-        console.error('Error fetching profile for update:', fetchError);
+        logger.error('Auth', 'Error fetching profile for update:', fetchError.message);
         throw fetchError;
       }
       
-      console.log('Existing profile found:', existingProfile);
+      logger.info('Auth', 'Existing profile found');
       
       // Only update the fields that were provided in the data object
       const updateData: Partial<UserProfile> = {
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
       };
       
-      // Add only the fields that were provided in the update
       if (data.full_name !== undefined) updateData.full_name = data.full_name;
       if (data.avatar_url !== undefined) updateData.avatar_url = data.avatar_url;
       if (data.timezone !== undefined) updateData.timezone = data.timezone;
       
-      console.log('Updating profile with specific fields:', updateData);
+      logger.info('Auth', 'Updating profile with specific fields');
       
       // Update the profile
       const { data: updatedProfile, error: updateError } = await supabase
         .from('profiles')
         .update(updateData)
         .eq('id', user.id)
-        .select('*')
+        .select()
         .single();
         
       if (updateError) {
-        console.error('Error updating profile:', updateError);
+        logger.error('Auth', 'Error updating profile:', updateError.message);
         throw updateError;
       }
       
-      console.log('Profile updated successfully:', updatedProfile);
+      logger.info('Auth', 'Profile updated successfully');
       
       if (updatedProfile) {
         setProfile(updatedProfile);
         return updatedProfile;
       } else {
         // If no data returned (which should not happen), fetch the profile explicitly
-        console.log('No data returned from update, fetching profile');
+        logger.info('Auth', 'No data returned from update, fetching profile');
         return await refreshProfile();
       }
     } catch (error) {
-      console.error('Exception updating profile:', error);
+      logger.error('Auth', 'Exception updating profile:', error instanceof Error ? error.message : String(error));
       throw error;
     }
   };
   
-  const value = {
+  const value: AuthContextType = {
     user,
     profile,
     session,
     isLoading,
-    signIn,
-    signUp,
-    signInWithProvider,
+    signIn: async (email, password) => {
+      const result = await supabase.auth.signInWithPassword({ email, password });
+      return { data: result.data, error: result.error };
+    },
+    signUp: async (email, password, metadata) => {
+      try {
+        const result = await signUp(email, password, metadata);
+        return { data: result, error: null };
+      } catch (err) {
+        return { data: null, error: err as Error };
+      }
+    },
+    signInWithProvider: async (provider) => {
+      try {
+        const result = await signInWithProvider(provider);
+        return { data: result, error: null };
+      } catch (err) {
+        return { data: null, error: err as Error };
+      }
+    },
     signOut,
     updateProfile,
-    refreshProfile,
+    refreshProfile
   };
   
   return createElement(AuthContext.Provider, { value }, children);

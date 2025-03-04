@@ -3,8 +3,9 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { FaTwitter, FaInstagram, FaFacebook, FaYoutube, FaTiktok, FaPinterest } from 'react-icons/fa';
+import { FaTwitter, FaInstagram, FaFacebook, FaYoutube, FaTiktok, FaPinterest, FaExclamationTriangle } from 'react-icons/fa';
 import { SiLinkedin, SiBluesky } from 'react-icons/si';
+import { useToast } from '@/components/ui/Toast';
 
 // Define platform interface for scalability
 interface SocialPlatform {
@@ -19,9 +20,11 @@ export default function ConnectAccountPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialPlatform = searchParams.get('platform') || '';
+  const isReconnect = searchParams.get('reconnect') === 'true';
   
   const [selectedPlatform, setSelectedPlatform] = useState(initialPlatform);
   const [isConnecting, setIsConnecting] = useState(false);
+  const { addToast } = useToast();
 
   // Define our supported platforms - easy to add new ones
   const platforms: SocialPlatform[] = [
@@ -92,31 +95,48 @@ export default function ConnectAccountPage() {
 
   const handleConnect = async () => {
     if (!selectedPlatform) {
-      alert('Please select a platform to connect');
+      addToast({
+        type: 'error',
+        message: 'Please select a platform to connect'
+      });
       return;
     }
 
     const platform = platforms.find(p => p.id === selectedPlatform);
     
     if (!platform) {
-      alert('Invalid platform selected');
+      addToast({
+        type: 'error',
+        message: 'Invalid platform selected'
+      });
       return;
     }
     
     if (!platform.available) {
-      alert(`${platform.name} integration is coming soon!`);
+      addToast({
+        type: 'info',
+        message: `${platform.name} integration is coming soon!`
+      });
       return;
     }
 
     setIsConnecting(true);
     
     try {
+      // Set a flag in localStorage to indicate this is a reconnection
+      if (isReconnect) {
+        localStorage.setItem('reconnecting_platform', selectedPlatform);
+      }
+      
       // Our new API structure uses a consistent pattern
-      window.location.href = `/api/social/${selectedPlatform}/login`;
+      window.location.href = `/api/social/${selectedPlatform}/login?${isReconnect ? 'reconnect=true' : ''}`;
       return; // Don't reset isConnecting since we're navigating away
     } catch (error) {
       console.error('Error connecting account:', error);
-      alert('Failed to connect account. Please try again.');
+      addToast({
+        type: 'error',
+        message: 'Failed to connect account. Please try again.'
+      });
       setIsConnecting(false);
     }
   };
@@ -124,7 +144,9 @@ export default function ConnectAccountPage() {
   return (
     <div className="max-w-2xl mx-auto">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Connect a New Account</h1>
+        <h1 className="text-2xl font-bold">
+          {isReconnect ? 'Reconnect Account' : 'Connect a New Account'}
+        </h1>
         <Link
           href="/accounts"
           className="text-gray-400 hover:text-gray-300"
@@ -132,6 +154,19 @@ export default function ConnectAccountPage() {
           Back to Accounts
         </Link>
       </div>
+
+      {isReconnect && (
+        <div className="mb-6 p-4 bg-amber-900/20 border border-amber-800 rounded-lg flex items-start">
+          <FaExclamationTriangle className="text-amber-500 mt-1 mr-3 flex-shrink-0" />
+          <div>
+            <h3 className="text-amber-400 font-medium">Token Expired</h3>
+            <p className="text-gray-300 text-sm mt-1">
+              Your {selectedPlatform.charAt(0).toUpperCase() + selectedPlatform.slice(1)} token has expired. 
+              You need to reconnect to continue receiving metrics.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="bg-dark-500 rounded-lg p-6 border border-dark-400">
         <h2 className="text-xl font-semibold mb-4">Select Platform</h2>
@@ -168,7 +203,7 @@ export default function ConnectAccountPage() {
                 : 'bg-blue-600 hover:bg-blue-700'
             } text-white`}
           >
-            {isConnecting ? 'Connecting...' : 'Connect Account'}
+            {isConnecting ? 'Connecting...' : isReconnect ? 'Reconnect Account' : 'Connect Account'}
           </button>
         </div>
       </div>

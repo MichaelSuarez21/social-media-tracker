@@ -75,43 +75,6 @@ export default function RootLayout({
             </footer>
           </div>
         </AuthProvider>
-        
-        {/* Include a simple script to handle localhost to 127.0.0.1 redirect */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              // Only execute on the client side
-              if (typeof window !== 'undefined') {
-                // Check if we're on localhost
-                if (window.location.hostname === 'localhost') {
-                  // Create a notification element
-                  const notificationDiv = document.createElement('div');
-                  notificationDiv.className = 'fixed bottom-4 right-4 max-w-md p-4 bg-amber-900 border border-amber-700 rounded-lg shadow-lg z-50';
-                  notificationDiv.innerHTML = \`
-                    <h3 class="text-lg font-medium text-amber-200">Twitter Integration Notice</h3>
-                    <p class="mt-2 text-sm text-amber-300">
-                      For Twitter OAuth to work properly, you should use <strong>127.0.0.1</strong> instead of <strong>localhost</strong>.
-                    </p>
-                    <div class="mt-3 flex justify-end">
-                      <button class="px-4 py-2 text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-md">
-                        Switch to 127.0.0.1
-                      </button>
-                    </div>
-                  \`;
-                  
-                  // Append to body
-                  document.body.appendChild(notificationDiv);
-                  
-                  // Add click handler to the button
-                  notificationDiv.querySelector('button').addEventListener('click', () => {
-                    // Replace localhost with 127.0.0.1 in URL
-                    window.location.href = window.location.href.replace('localhost', '127.0.0.1');
-                  });
-                }
-              }
-            `,
-          }}
-        />
       </body>
     </html>
   );
