@@ -12,6 +12,12 @@ export class TwitterPlatform extends BasePlatform {
     this.clientId = process.env.TWITTER_CLIENT_ID || '';
     this.clientSecret = process.env.TWITTER_CLIENT_SECRET || '';
     this.redirectUri = process.env.TWITTER_REDIRECT_URI || '';
+    
+    // Debug constructor values
+    console.log('TwitterPlatform initialized with:');
+    console.log('- Client ID length:', this.clientId ? this.clientId.length : 0);
+    console.log('- Client Secret length:', this.clientSecret ? this.clientSecret.length : 0);
+    console.log('- Redirect URI:', this.redirectUri);
   }
   
   getAuthUrl(): string {
@@ -37,11 +43,19 @@ export class TwitterPlatform extends BasePlatform {
     
     // Construct the Twitter authorization URL
     const authUrl = new URL('https://twitter.com/i/oauth2/authorize');
+    
+    // Required parameters
     authUrl.searchParams.append('response_type', 'code');
     authUrl.searchParams.append('client_id', this.clientId);
     authUrl.searchParams.append('redirect_uri', this.redirectUri);
+    
+    // Using minimal scopes to avoid permission issues
     authUrl.searchParams.append('scope', 'tweet.read users.read');
+    
+    // CSRF protection
     authUrl.searchParams.append('state', state);
+    
+    // PKCE parameters
     authUrl.searchParams.append('code_challenge', codeChallenge);
     authUrl.searchParams.append('code_challenge_method', 'S256');
     
@@ -65,6 +79,7 @@ export class TwitterPlatform extends BasePlatform {
     if (!code) throw new Error('Authorization code is missing');
     if (!codeVerifier) throw new Error('Code verifier is missing');
     if (!this.clientId) throw new Error('Twitter client ID is not configured');
+    if (!this.clientSecret) throw new Error('Twitter client secret is not configured');
     if (!this.redirectUri) throw new Error('Twitter redirect URI is not configured');
     
     // Prepare token request parameters
@@ -75,15 +90,21 @@ export class TwitterPlatform extends BasePlatform {
     params.append('redirect_uri', this.redirectUri);
     params.append('code_verifier', codeVerifier);
     
-    // Client secret is not needed for PKCE in the request body, using clientId only
+    // Create Basic Authentication header using client_id and client_secret
+    const authHeader = `Basic ${Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64')}`;
+    console.log('Authorization header created (first 20 chars):', authHeader.substring(0, 20) + '...');
     
     try {
       // Make the token exchange request
       console.log('Sending token request to Twitter API...');
+      console.log('Request URL: https://api.twitter.com/2/oauth2/token');
+      console.log('Request body:', params.toString());
+      
       const response = await fetch('https://api.twitter.com/2/oauth2/token', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': authHeader
         },
         body: params.toString(),
       });

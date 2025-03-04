@@ -13,57 +13,35 @@ export default function HeaderManager() {
   // Track what we should display
   const [showHeader, setShowHeader] = useState<string | null>(null);
   
-  // Only show DashboardHeader when authenticated, otherwise show PublicHeader
+  // Determine which header to show based primarily on auth state
   // Special case: No header on auth callback page
   useEffect(() => {
+    // Skip header on auth callback page
     if (pathname?.startsWith('/auth/callback')) {
+      logger.debug('HeaderManager', 'On auth callback page, hiding header');
       setShowHeader(null);
       return;
     }
 
-    // Consider a path to be protected/authenticated if it starts with:
-    const authenticatedRoutes = [
-      '/dashboard',
-      '/account',
-      '/accounts',
-      '/analytics',
-      '/settings',
-    ];
-
-    // Check if the current path is an authenticated route
-    const isAuthenticatedRoute = authenticatedRoutes.some(route => 
-      pathname?.startsWith(route)
-    );
-
-    // Check for Supabase auth token in localStorage as a backup
-    let hasSupabaseAuth = false;
-    try {
-      hasSupabaseAuth = typeof window !== 'undefined' && 
-        !!localStorage.getItem('supabase.auth.token');
-      
-      logger.debug('HeaderManager', 'Initial localStorage auth check:', hasSupabaseAuth);
-    } catch (e) {
-      logger.error('HeaderManager', 'Error checking localStorage:', e);
-    }
-
-    // Wait for auth to load before showing headers
+    // Wait for auth to load before making decisions
     if (isLoading) {
+      logger.debug('HeaderManager', 'Auth still loading, delaying header decision');
       setShowHeader(null);
       return;
     }
 
-    // On authenticated routes, skip header if not authenticated
-    if (isAuthenticatedRoute) {
-      if (user || session) {
-        setShowHeader('dashboard');
-      } else {
-        setShowHeader(null);
-      }
-      logger.debug('HeaderManager', 'Auth loading complete, session:', !!session);
-    } else {
-      // On public routes, show public header
-      setShowHeader('public');
+    // If user is authenticated, show dashboard header regardless of path
+    // (except for the callback page handled above)
+    if (user || session) {
+      logger.debug('HeaderManager', 'User is authenticated, showing dashboard header');
+      setShowHeader('dashboard');
+      return;
     }
+
+    // For unauthenticated users, show the public header
+    logger.debug('HeaderManager', 'User is not authenticated, showing public header');
+    setShowHeader('public');
+    
   }, [pathname, session, user, isLoading]);
   
   logger.debug('HeaderManager', 'Rendering state', {
@@ -71,16 +49,17 @@ export default function HeaderManager() {
     isLoading,
     showHeader,
     userId: user?.id,
-    pathname,
-    isAuthenticatedRoute: pathname && ['/dashboard', '/account', '/accounts', '/analytics', '/settings'].some(route => pathname.startsWith(route))
+    pathname
   });
   
   // Render the appropriate header based on auth state
   if (showHeader === null) {
-    if (pathname && ['/dashboard', '/account', '/accounts', '/analytics', '/settings'].some(route => pathname.startsWith(route))) {
-      logger.debug('HeaderManager', 'On authenticated route, skipping header render', pathname);
+    // When header state is null (loading or callback page)
+    if (pathname && pathname.startsWith('/auth/callback')) {
+      // No header on auth callback
       return null;
     }
+    // Default to public header while loading
     return <PublicHeader />;
   }
   
@@ -89,6 +68,6 @@ export default function HeaderManager() {
     return <DashboardHeader />;
   }
   
-  logger.debug('HeaderManager', 'No header determined yet, showing PublicHeader as fallback');
+  logger.debug('HeaderManager', 'Rendering PublicHeader');
   return <PublicHeader />;
 } 

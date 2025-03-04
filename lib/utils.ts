@@ -1,4 +1,6 @@
 import { format, subDays, subWeeks, subMonths } from 'date-fns';
+import { type ClassValue, clsx } from 'clsx';
+import { twMerge } from 'tailwind-merge';
 
 // Format a date string
 export function formatDate(date: Date | string, formatStr: string = 'MMM d, yyyy'): string {
@@ -96,4 +98,11 @@ export function generateSampleData(
   }
   
   return result;
+}
+
+/**
+ * Utility function to conditionally join class names together
+ */
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
 } 

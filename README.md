@@ -52,11 +52,28 @@ npm run dev
 yarn dev
 ```
 
-5. Open [http://localhost:3000](http://localhost:3000) in your browser
+5. Open [http://127.0.0.1:3000](http://127.0.0.1:3000) in your browser
+
+> **IMPORTANT NOTE:** For Twitter OAuth integration to work properly, you **must** use `127.0.0.1` instead of `localhost` in your browser. This is because Twitter OAuth cookies are set based on the domain used during the authorization flow. When configuring your Twitter developer application, set the callback URL to use `127.0.0.1` as well.
 
 ## Social Media Platform Integration
 
 This application connects to various social media platforms through their official APIs. You will need to create developer accounts and obtain API credentials for each platform you wish to integrate.
+
+### Twitter Integration Setup
+
+1. Create a Twitter Developer account at [developer.twitter.com](https://developer.twitter.com)
+2. Create a new project and app
+3. Configure your app with the following:
+   - Set the callback URL to `http://127.0.0.1:3000/api/social/twitter/callback`
+   - Enable OAuth 2.0 with PKCE
+   - Request the required scopes (`tweet.read`, `users.read`)
+4. Add your Twitter credentials to `.env.local`:
+```
+TWITTER_CLIENT_ID=your-twitter-client-id
+TWITTER_CLIENT_SECRET=your-twitter-client-secret
+TWITTER_REDIRECT_URI=http://127.0.0.1:3000/api/social/twitter/callback
+```
 
 ## Contributing
 
