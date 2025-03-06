@@ -1,79 +1,123 @@
 # Social Media Tracker
 
-A comprehensive dashboard for tracking and analyzing your social media performance across multiple platforms.
+A comprehensive platform for tracking metrics across various social media accounts.
 
 ## Features
 
-- **Unified Dashboard**: View all your social media analytics in one place
-- **Multi-Platform Support**: Track Twitter, Instagram, Facebook, YouTube, Pinterest, Twitch, TikTok, BlueSky and more
-- **Performance Metrics**: Monitor followers, views, engagement rates, and growth trends
-- **Secure Authentication**: User accounts with Supabase authentication
-- **Responsive Design**: Beautiful, dark-themed UI that works on all devices
-
-## Tech Stack
-
-- **Frontend**: Next.js 15 with React 19, TypeScript
-- **Styling**: Tailwind CSS
-- **Authentication & Backend**: Supabase
-- **Data Visualization**: Chart.js with react-chartjs-2
+- Connect to multiple social media platforms (YouTube, with more coming soon)
+- Automatically collect and store metrics
+- View metrics history and trends
+- Analyze engagement across platforms
+- Schedule automatic metric collection via cron jobs
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js 20.x or higher
-- npm or yarn
+- Node.js 18+
+- Yarn or npm
+- A Supabase account
+- API keys for the social platforms you want to support
 
 ### Installation
 
-1. Clone the repository
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/social-media-tracker.git
+   cd social-media-tracker
+   ```
+
+2. Install dependencies:
+   ```bash
+   npm install
+   # or
+   yarn
+   ```
+
+3. Set up environment variables:
+   ```bash
+   cp .env.example .env.local
+   ```
+   Then edit `.env.local` with your API keys and configuration.
+
+4. Run database migrations:
+   ```bash
+   npm run db:migrate
+   # or
+   yarn db:migrate
+   ```
+
+5. Start the development server:
+   ```bash
+   npm run dev
+   # or
+   yarn dev
+   ```
+
+## Metrics Refresh System
+
+The application includes an automated metrics refresh system that periodically fetches fresh data from connected social platforms.
+
+### How It Works
+
+1. A scheduled cron job calls the `/api/cron/refresh-metrics` endpoint
+2. The endpoint fetches all connected social accounts
+3. For each account:
+   - Checks if tokens need refreshing
+   - Fetches fresh metrics from the respective platform APIs
+   - Stores metrics in the database
+   - Updates account metadata
+
+### Setting Up the Cron Job
+
+#### Option 1: Vercel Deployment (Recommended)
+
+If deploying to Vercel:
+
+1. Ensure the `vercel.json` file is in the root directory with the cron configuration
+2. Add the `METRICS_REFRESH_API_KEY` environment variable in your Vercel project settings
+3. Deploy your application to Vercel
+4. Vercel will automatically set up the cron job based on the configuration
+
+#### Option 2: Manual Testing
+
+You can manually trigger the cron job using the provided test script:
+
 ```bash
-git clone https://github.com/yourusername/social-media-tracker.git
-cd social-media-tracker
+# Set the API key in your .env.local file first
+npm run test:cron
+# or with custom URL and key
+npm run test:cron -- --url https://your-deployment-url.com --key your-api-key
 ```
 
-2. Install dependencies
+#### Option 3: External Cron Service
+
+You can use an external service to call the endpoint periodically:
+
+1. Set up a service like [Pipedream](https://pipedream.com/) or [Cronhooks](https://cronhooks.io/)
+2. Configure it to make a GET request to:
+   ```
+   https://your-deployment-url.com/api/cron/refresh-metrics?key=your-api-key
+   ```
+
+See the [cron setup documentation](docs/cron-setup.md) for more detailed instructions.
+
+## Database Setup
+
+The application uses Supabase for the database. You'll need to run migrations to set up the necessary tables and functions.
+
 ```bash
-npm install
-# or
-yarn
+# Run all migrations
+npm run db:migrate
+
+# Run only schema migrations
+npm run db:migrate:schema
+
+# Run only function migrations
+npm run db:migrate:functions
 ```
 
-3. Create a `.env.local` file in the root directory with your Supabase credentials:
-```
-NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
-```
-
-4. Run the development server
-```bash
-npm run dev
-# or
-yarn dev
-```
-
-5. Open [http://127.0.0.1:3000](http://127.0.0.1:3000) in your browser
-
-> **IMPORTANT NOTE:** For Twitter OAuth integration to work properly, you **must** use `127.0.0.1` instead of `localhost` in your browser. This is because Twitter OAuth cookies are set based on the domain used during the authorization flow. When configuring your Twitter developer application, set the callback URL to use `127.0.0.1` as well.
-
-## Social Media Platform Integration
-
-This application connects to various social media platforms through their official APIs. You will need to create developer accounts and obtain API credentials for each platform you wish to integrate.
-
-### Twitter Integration Setup
-
-1. Create a Twitter Developer account at [developer.twitter.com](https://developer.twitter.com)
-2. Create a new project and app
-3. Configure your app with the following:
-   - Set the callback URL to `http://127.0.0.1:3000/api/social/twitter/callback`
-   - Enable OAuth 2.0 with PKCE
-   - Request the required scopes (`tweet.read`, `users.read`)
-4. Add your Twitter credentials to `.env.local`:
-```
-TWITTER_CLIENT_ID=your-twitter-client-id
-TWITTER_CLIENT_SECRET=your-twitter-client-secret
-TWITTER_REDIRECT_URI=http://127.0.0.1:3000/api/social/twitter/callback
-```
+See the [database documentation](db/README.md) for more details.
 
 ## Contributing
 

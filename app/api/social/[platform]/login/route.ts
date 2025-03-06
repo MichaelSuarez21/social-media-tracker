@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { twitterPlatform } from '@/lib/social/TwitterPlatform';
+import { youtubePlatform } from '@/lib/social/YoutubePlatform';
 
 // This map contains all supported platforms
 const platforms = {
   twitter: twitterPlatform,
+  youtube: youtubePlatform,
   // Add more platforms here as they're implemented:
   // instagram: instagramPlatform,
   // facebook: facebookPlatform,

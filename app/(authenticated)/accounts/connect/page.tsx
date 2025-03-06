@@ -54,7 +54,7 @@ export default function ConnectAccountPage() {
       name: 'YouTube', 
       icon: <FaYoutube className="text-2xl" />, 
       color: 'border-red-500 bg-red-900/20', 
-      available: false 
+      available: true 
     },
     { 
       id: 'tiktok', 

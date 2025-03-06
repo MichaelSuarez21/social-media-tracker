@@ -174,17 +174,24 @@ export default function Dashboard() {
     const platformMetrics: MetricsData = {};
     
     try {
-      // Process each account to fetch its metrics
-      const platformPromises = accounts.map(async (account) => {
+      // Get unique platforms to avoid duplicate API calls
+      const uniquePlatforms = Array.from(new Set(accounts.map(account => account.platform)));
+      
+      // Process each platform (not account) to fetch its metrics - this reduces duplicate calls
+      const platformPromises = uniquePlatforms.map(async (platform) => {
         try {
-          const res = await fetch(`/api/social/${account.platform}/metrics`);
+          // Find the first account for this platform
+          const account = accounts.find(a => a.platform === platform);
+          if (!account) return;
+          
+          const res = await fetch(`/api/social/${platform}/metrics`);
           
           if (res.ok) {
             const data = await res.json();
             
             // Initialize platform metrics if not exists
-            if (!platformMetrics[account.platform]) {
-              platformMetrics[account.platform] = {
+            if (!platformMetrics[platform]) {
+              platformMetrics[platform] = {
                 followers: new Array(dateLabels.length).fill(0),
                 views: new Array(dateLabels.length).fill(0),
                 engagement: new Array(dateLabels.length).fill(0)
@@ -200,9 +207,9 @@ export default function Dashboard() {
             
             // Set followers data from account metadata or API
             if (data.accountInfo?.followers) {
-              platformMetrics[account.platform].followers[lastIndex] = data.accountInfo.followers;
+              platformMetrics[platform].followers[lastIndex] = data.accountInfo.followers;
             } else if (account.metadata?.followers_count) {
-              platformMetrics[account.platform].followers[lastIndex] = account.metadata.followers_count;
+              platformMetrics[platform].followers[lastIndex] = account.metadata.followers_count;
             }
             
             // Set views/impressions based on sum of recent posts
@@ -213,7 +220,7 @@ export default function Dashboard() {
               return sum + Number(impressions);
             }, 0) || 0;
             
-            platformMetrics[account.platform].views[lastIndex] = totalViews;
+            platformMetrics[platform].views[lastIndex] = totalViews;
             
             // Calculate average engagement from posts (simplified)
             let avgEngagement = 0;
@@ -230,7 +237,7 @@ export default function Dashboard() {
               avgEngagement = totalEngagement / data.posts.length;
             }
             
-            platformMetrics[account.platform].engagement[lastIndex] = avgEngagement;
+            platformMetrics[platform].engagement[lastIndex] = avgEngagement;
             
             // Fill in previous days with slightly varying data
             // In a real app, you'd get historical data from the API
@@ -239,18 +246,18 @@ export default function Dashboard() {
               const viewsVariation = Math.random() * 0.1 - 0.05; // -5% to +5%
               const engagementVariation = Math.random() * 0.05 - 0.025; // -2.5% to +2.5%
               
-              platformMetrics[account.platform].followers[i] = 
-                Math.round(platformMetrics[account.platform].followers[i+1] * (1 - followerVariation));
+              platformMetrics[platform].followers[i] = 
+                Math.round(platformMetrics[platform].followers[i+1] * (1 - followerVariation));
               
-              platformMetrics[account.platform].views[i] = 
-                Math.round(platformMetrics[account.platform].views[i+1] * (1 - viewsVariation));
+              platformMetrics[platform].views[i] = 
+                Math.round(platformMetrics[platform].views[i+1] * (1 - viewsVariation));
               
-              platformMetrics[account.platform].engagement[i] = 
-                Math.max(0, platformMetrics[account.platform].engagement[i+1] * (1 - engagementVariation));
+              platformMetrics[platform].engagement[i] = 
+                Math.max(0, platformMetrics[platform].engagement[i+1] * (1 - engagementVariation));
             }
           }
         } catch (error) {
-          console.error(`Error fetching metrics for ${account.platform}:`, error);
+          console.error(`Error fetching metrics for ${platform}:`, error);
         }
       });
       
@@ -276,6 +283,7 @@ export default function Dashboard() {
       data: number[];
       borderColor: string;
       backgroundColor: string;
+      tension?: number;
     }> = [];
     
     if (usingSampleData) {
@@ -294,6 +302,7 @@ export default function Dashboard() {
             ),
             borderColor: PLATFORM_COLORS.twitter.borderColor,
             backgroundColor: PLATFORM_COLORS.twitter.backgroundColor,
+            tension: 0.3,
           },
           {
             label: 'Instagram',
@@ -306,6 +315,7 @@ export default function Dashboard() {
             ),
             borderColor: PLATFORM_COLORS.instagram.borderColor,
             backgroundColor: PLATFORM_COLORS.instagram.backgroundColor,
+            tension: 0.3,
           },
           {
             label: 'YouTube',
@@ -318,25 +328,49 @@ export default function Dashboard() {
             ),
             borderColor: PLATFORM_COLORS.youtube.borderColor,
             backgroundColor: PLATFORM_COLORS.youtube.backgroundColor,
+            tension: 0.3,
           },
         ],
       };
     } else {
       // Use real data from connected accounts
       Object.entries(metricsData).forEach(([platform, metrics]) => {
+        // Skip if metrics are empty
+        if (!metrics[dataType] || metrics[dataType].every(v => v === 0)) {
+          return;
+        }
+        
         datasets.push({
           label: platform.charAt(0).toUpperCase() + platform.slice(1),
           data: metrics[dataType],
           borderColor: PLATFORM_COLORS[platform]?.borderColor || PLATFORM_COLORS.default.borderColor,
           backgroundColor: PLATFORM_COLORS[platform]?.backgroundColor || PLATFORM_COLORS.default.backgroundColor,
+          tension: 0.3,
         });
       });
       
-      return {
-        labels: dateLabels,
-        datasets,
-      };
+      // Make sure YouTube data is included in the main dashboard charts
+      // even if it might not show up automatically from connected accounts
+      const youtubeAccount = connectedAccounts.find(account => account.platform === 'youtube');
+      if (youtubeAccount && !datasets.some(d => d.label.toLowerCase() === 'youtube')) {
+        // Add YouTube data if it exists but wasn't added above
+        const youtubeData = metricsData.youtube?.[dataType];
+        if (youtubeData && youtubeData.some(v => v > 0)) {
+          datasets.push({
+            label: 'YouTube',
+            data: youtubeData,
+            borderColor: PLATFORM_COLORS.youtube.borderColor,
+            backgroundColor: PLATFORM_COLORS.youtube.backgroundColor,
+            tension: 0.3,
+          });
+        }
+      }
     }
+    
+    return {
+      labels: dateLabels,
+      datasets,
+    };
   };
 
   // Generate chart data
@@ -376,10 +410,31 @@ export default function Dashboard() {
       
       platforms.forEach(platform => {
         const lastIndex = dateLabels.length - 1;
-        metrics.totalFollowers += metricsData[platform].followers[lastIndex] || 0;
-        metrics.totalViews += metricsData[platform].views[lastIndex] || 0;
-        metrics.avgEngagement += metricsData[platform].engagement[lastIndex] || 0;
+        // Make sure we have valid data
+        if (metricsData[platform]?.followers && metricsData[platform].followers.length > 0) {
+          metrics.totalFollowers += metricsData[platform].followers[lastIndex] || 0;
+        }
+        if (metricsData[platform]?.views && metricsData[platform].views.length > 0) {
+          metrics.totalViews += metricsData[platform].views[lastIndex] || 0;
+        }
+        if (metricsData[platform]?.engagement && metricsData[platform].engagement.length > 0) {
+          metrics.avgEngagement += metricsData[platform].engagement[lastIndex] || 0;
+        }
       });
+      
+      // Specifically check for YouTube data to ensure it's included
+      if (metricsData.youtube) {
+        const lastIndex = dateLabels.length - 1;
+        // Only add if not already counted (avoid double counting)
+        if (!platforms.includes('youtube')) {
+          if (metricsData.youtube.followers && metricsData.youtube.followers.length > 0) {
+            metrics.totalFollowers += metricsData.youtube.followers[lastIndex] || 0;
+          }
+          if (metricsData.youtube.views && metricsData.youtube.views.length > 0) {
+            metrics.totalViews += metricsData.youtube.views[lastIndex] || 0;
+          }
+        }
+      }
       
       if (platforms.length > 0) {
         metrics.avgEngagement /= platforms.length;
@@ -421,8 +476,8 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="mb-6">
+    <div className="container mx-auto px-4 py-8">
+      <div className="flex flex-col md:flex-row justify-between items-center mb-6">
         <h1 className="text-3xl font-bold text-white">Dashboard</h1>
         <p className="text-gray-400">View and manage your social media performance</p>
       </div>
@@ -540,89 +595,172 @@ export default function Dashboard() {
       
       {/* Platform-specific analytics cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8 mt-8">
-        {/* Twitter Analytics Card */}
-        <div className="bg-dark-500 rounded-lg p-6 border border-dark-400">
-          <div className="flex items-center mb-4">
-            <svg className="w-6 h-6 text-blue-400 mr-3" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M23.953 4.57a10 10 0 01-2.825.775 4.958 4.958 0 002.163-2.723c-.951.555-2.005.959-3.127 1.184a4.92 4.92 0 00-8.384 4.482C7.69 8.095 4.067 6.13 1.64 3.162a4.822 4.822 0 00-.666 2.475c0 1.71.87 3.213 2.188 4.096a4.904 4.904 0 01-2.228-.616v.06a4.923 4.923 0 003.946 4.827 4.996 4.996 0 01-2.212.085 4.936 4.936 0 004.604 3.417 9.867 9.867 0 01-6.102 2.105c-.39 0-.779-.023-1.17-.067a13.995 13.995 0 007.557 2.209c9.053 0 13.998-7.496 13.998-13.985 0-.21 0-.42-.015-.63A9.935 9.935 0 0024 4.59z" />
-            </svg>
-            <h2 className="text-xl font-semibold">Twitter Analytics</h2>
-          </div>
-          
-          {isLoading ? (
-            <div className="animate-pulse flex flex-col">
-              <div className="h-4 bg-dark-400 rounded w-3/4 mb-2"></div>
-              <div className="h-4 bg-dark-400 rounded w-1/2 mb-4"></div>
-              <div className="h-32 bg-dark-400 rounded mb-4"></div>
+        {/* Twitter Analytics Card - Only show if user has Twitter accounts */}
+        {connectedAccounts.some(account => account.platform === 'twitter') && (
+          <div className="bg-dark-500 rounded-lg p-6 border border-dark-400">
+            <div className="flex items-center mb-4">
+              <svg className="w-6 h-6 text-blue-400 mr-3" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M23.953 4.57a10 10 0 01-2.825.775 4.958 4.958 0 002.163-2.723c-.951.555-2.005.959-3.127 1.184a4.92 4.92 0 00-8.384 4.482C7.69 8.095 4.067 6.13 1.64 3.162a4.822 4.822 0 00-.666 2.475c0 1.71.87 3.213 2.188 4.096a4.904 4.904 0 01-2.228-.616v.06a4.923 4.923 0 003.946 4.827 4.996 4.996 0 01-2.212.085 4.936 4.936 0 004.604 3.417 9.867 9.867 0 01-6.102 2.105c-.39 0-.779-.023-1.17-.067a13.995 13.995 0 007.557 2.209c9.053 0 13.998-7.496 13.998-13.985 0-.21 0-.42-.015-.63A9.935 9.935 0 0024 4.59z" />
+              </svg>
+              <h2 className="text-xl font-semibold">Twitter Analytics</h2>
             </div>
-          ) : (
-            <>
-              <div className="mb-4">
-                {connectedAccounts.some(account => account.platform === 'twitter') ? (
-                  <div>
-                    <p className="text-gray-400 mb-1">Followers</p>
-                    <p className="text-2xl font-bold">
-                      {formatNumber(metricsData.twitter?.followers?.[metricsData.twitter.followers.length - 1] || 0)}
-                    </p>
-                    
-                    <div className="mt-4 h-32">
-                      <Line 
-                        data={{
-                          labels: generateDateLabels(timeframe, 7),
-                          datasets: [{
-                            label: 'Followers',
-                            data: metricsData.twitter?.followers?.slice(-7) || Array(7).fill(0),
-                            borderColor: PLATFORM_COLORS.twitter.borderColor,
-                            backgroundColor: PLATFORM_COLORS.twitter.backgroundColor,
-                            tension: 0.3,
-                          }]
-                        }}
-                        options={{
-                          responsive: true,
-                          maintainAspectRatio: false,
-                          plugins: {
-                            legend: {
+            
+            {isLoading ? (
+              <div className="animate-pulse flex flex-col">
+                <div className="h-4 bg-dark-400 rounded w-3/4 mb-2"></div>
+                <div className="h-4 bg-dark-400 rounded w-1/2 mb-4"></div>
+                <div className="h-32 bg-dark-400 rounded mb-4"></div>
+              </div>
+            ) : (
+              <>
+                <div className="mb-4">
+                  <p className="text-gray-400 mb-1">Followers</p>
+                  <p className="text-2xl font-bold">
+                    {formatNumber(metricsData.twitter?.followers?.[metricsData.twitter.followers.length - 1] || 0)}
+                  </p>
+                  
+                  <div className="mt-4 h-32">
+                    <Line 
+                      data={{
+                        labels: generateDateLabels(timeframe, 7),
+                        datasets: [{
+                          label: 'Followers',
+                          data: metricsData.twitter?.followers?.slice(-7) || Array(7).fill(0),
+                          borderColor: PLATFORM_COLORS.twitter.borderColor,
+                          backgroundColor: PLATFORM_COLORS.twitter.backgroundColor,
+                          tension: 0.3,
+                        }]
+                      }}
+                      options={{
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                          legend: {
+                            display: false,
+                          },
+                        },
+                        scales: {
+                          y: {
+                            beginAtZero: false,
+                            grid: {
                               display: false,
                             },
                           },
-                          scales: {
-                            y: {
-                              beginAtZero: false,
-                              grid: {
-                                display: false,
-                              },
+                          x: {
+                            grid: {
+                              display: false,
                             },
-                            x: {
-                              grid: {
-                                display: false,
-                              },
-                              ticks: {
-                                display: false,
-                              }
+                            ticks: {
+                              display: false,
                             }
-                          },
-                        }}
-                      />
-                    </div>
+                          }
+                        },
+                      }}
+                    />
                   </div>
-                ) : (
-                  <div className="text-center py-6">
-                    <p className="text-gray-400 mb-4">Connect your Twitter account to see analytics</p>
-                  </div>
-                )}
+                </div>
+                
+                <Link 
+                  href="/dashboard/twitter" 
+                  className="block w-full text-center bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded-lg transition-colors"
+                >
+                  View Detailed Analytics
+                </Link>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* YouTube Analytics Card - Only show if user has YouTube accounts */}
+        {connectedAccounts.some(account => account.platform === 'youtube') && (
+          <div className="bg-dark-500 rounded-lg p-6 border border-dark-400">
+            <div className="flex items-center mb-4">
+              <svg className="w-6 h-6 text-red-500 mr-3" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+              </svg>
+              <h2 className="text-xl font-semibold">YouTube Analytics</h2>
+            </div>
+            
+            {isLoading ? (
+              <div className="animate-pulse flex flex-col">
+                <div className="h-4 bg-dark-400 rounded w-3/4 mb-2"></div>
+                <div className="h-4 bg-dark-400 rounded w-1/2 mb-4"></div>
+                <div className="h-32 bg-dark-400 rounded mb-4"></div>
               </div>
-              
-              <Link 
-                href="/dashboard/twitter" 
-                className="block w-full text-center bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded-lg transition-colors"
-              >
-                View Detailed Analytics
-              </Link>
-            </>
-          )}
-        </div>
+            ) : (
+              <>
+                <div className="mb-4">
+                  <p className="text-gray-400 mb-1">Subscribers</p>
+                  <p className="text-2xl font-bold">
+                    {formatNumber(metricsData.youtube?.followers?.[metricsData.youtube.followers.length - 1] || 0)}
+                  </p>
+                  
+                  <div className="mt-4 h-32">
+                    <Line 
+                      data={{
+                        labels: generateDateLabels(timeframe, 7),
+                        datasets: [{
+                          label: 'Subscribers',
+                          data: metricsData.youtube?.followers?.slice(-7) || Array(7).fill(0),
+                          borderColor: PLATFORM_COLORS.youtube.borderColor,
+                          backgroundColor: PLATFORM_COLORS.youtube.backgroundColor,
+                          tension: 0.3,
+                        }]
+                      }}
+                      options={{
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                          legend: {
+                            display: false,
+                          },
+                        },
+                        scales: {
+                          y: {
+                            beginAtZero: false,
+                            grid: {
+                              display: false,
+                            },
+                          },
+                          x: {
+                            grid: {
+                              display: false,
+                            },
+                            ticks: {
+                              display: false,
+                            }
+                          }
+                        },
+                      }}
+                    />
+                  </div>
+                </div>
+                
+                <Link 
+                  href="/dashboard/youtube" 
+                  className="block w-full text-center bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded-lg transition-colors"
+                >
+                  View Detailed Analytics
+                </Link>
+              </>
+            )}
+          </div>
+        )}
         
-        {/* Other platform cards would go here */}
+        {/* Add Account Card - Always show this to allow users to add more accounts */}
+        <div className="bg-dark-500 rounded-lg p-6 border border-dark-400 border-dashed flex flex-col justify-center items-center">
+          <svg className="w-12 h-12 text-gray-500 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+          </svg>
+          <h3 className="text-lg font-medium text-gray-400 mb-2">Add Social Media Account</h3>
+          <p className="text-gray-500 text-center mb-4">Connect more social platforms to track your performance</p>
+          <Link
+            href="/accounts/connect"
+            className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-md transition-colors"
+          >
+            Connect Account
+          </Link>
+        </div>
       </div>
       
       {/* Connected Accounts Section */}
@@ -692,7 +830,8 @@ export default function Dashboard() {
                 connectedAccounts.map(account => {
                   const platform = account.platform;
                   const platformName = platform.charAt(0).toUpperCase() + platform.slice(1);
-                  const username = account.platform_username;
+                  const username = account.platform_username || account.platform_user_id || 'Unknown';
+                  const displayName = account.metadata?.name || username;
                   const followers = account.metadata?.followers_count || 
                                    (metricsData[platform]?.followers[dateLabels.length - 1] || 0);
                   
@@ -708,11 +847,23 @@ export default function Dashboard() {
                     <div key={account.id} className="flex items-center justify-between p-4 bg-dark-600 rounded-lg">
                       <div className="flex items-center">
                         <div className={`w-10 h-10 ${bgColorClass} rounded-full flex items-center justify-center`}>
-                          <span className="text-white font-bold">{platformName.charAt(0)}</span>
+                          {account.metadata?.profile_image_url ? (
+                            <img 
+                              src={account.metadata.profile_image_url} 
+                              alt={platformName} 
+                              className="w-10 h-10 rounded-full object-cover"
+                            />
+                          ) : (
+                            <span className="text-white font-bold">{platformName.charAt(0)}</span>
+                          )}
                         </div>
                         <div className="ml-4">
                           <h3 className="font-medium text-white">{platformName}</h3>
-                          <p className="text-gray-400 text-sm">@{username}</p>
+                          <p className="text-gray-400 text-sm">
+                            {platform === 'youtube' 
+                              ? (displayName || 'Channel')
+                              : (username ? `@${username}` : 'Unknown')}
+                          </p>
                         </div>
                       </div>
                       <div className="text-right">

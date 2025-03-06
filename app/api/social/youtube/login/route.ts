@@ -4,10 +4,10 @@ import { cookies } from 'next/headers';
 import { randomBytes, createHash } from 'crypto';
 import logger from '@/lib/logger';
 import { encryptData } from '@/lib/encryptedCookie';
-import { storeTwitterOAuthSession } from '@/lib/twitterOAuthStore';
+import { youtubePlatform } from '@/lib/social/YoutubePlatform';
 
 /**
- * Initiates Twitter OAuth 2.0 login
+ * Initiates YouTube OAuth 2.0 login
  */
 export async function GET(request: NextRequest) {
   try {
@@ -41,9 +41,8 @@ export async function GET(request: NextRequest) {
       .replace(/\//g, '_')
       .replace(/=/g, '');
 
-    // Prepare the redirect URL to Twitter's OAuth 2.0 endpoint
-    const redirectUri = process.env.TWITTER_REDIRECT_URI || `${process.env.NEXT_PUBLIC_APP_URL}/api/social/twitter/callback`;
-    const scope = 'tweet.read users.read offline.access';
+    // Prepare the redirect URL to YouTube's OAuth 2.0 endpoint
+    const redirectUri = process.env.YOUTUBE_REDIRECT_URI || `${process.env.NEXT_PUBLIC_APP_URL}/api/social/youtube/callback`;
     
     // Generate a unique identifier for this login attempt
     const loginId = randomBytes(8).toString('hex');
@@ -51,16 +50,10 @@ export async function GET(request: NextRequest) {
     // Store the original state and login ID for verification
     const stateWithId = `${state}.${loginId}`;
     
-    const twitterAuthUrl = new URL('https://twitter.com/i/oauth2/authorize');
-    twitterAuthUrl.searchParams.append('response_type', 'code');
-    twitterAuthUrl.searchParams.append('client_id', process.env.TWITTER_CLIENT_ID || '');
-    twitterAuthUrl.searchParams.append('redirect_uri', redirectUri);
-    twitterAuthUrl.searchParams.append('scope', scope);
-    twitterAuthUrl.searchParams.append('state', stateWithId);
-    twitterAuthUrl.searchParams.append('code_challenge', codeChallenge);
-    twitterAuthUrl.searchParams.append('code_challenge_method', 'S256');
+    // Create the YouTube authorization URL
+    const youtubeAuthUrl = youtubePlatform.createAuthUrl(stateWithId, codeChallenge);
 
-    logger.info(`Starting Twitter OAuth for user ${session.user.id}`, { isReconnect });
+    logger.info(`Starting YouTube OAuth for user ${session.user.id}`, { isReconnect });
     
     // Store the auth data in an encrypted cookie
     const cookieData = {
@@ -70,26 +63,23 @@ export async function GET(request: NextRequest) {
       loginId
     };
     
-    // Also store in server-side store as a backup
-    storeTwitterOAuthSession(loginId, stateWithId, codeVerifier, isReconnect);
-    
     // Encrypt the cookie data
     const encryptedCookieValue = encryptData(cookieData);
     
     // Add debug logging
-    console.log('Twitter OAuth initialization debug info:');
+    console.log('YouTube OAuth initialization debug info:');
     console.log('Redirect URI:', redirectUri);
-    console.log('Twitter Client ID available:', !!process.env.TWITTER_CLIENT_ID);
+    console.log('YouTube Client ID available:', !!process.env.YOUTUBE_CLIENT_ID);
     console.log('Code challenge method:', 'S256');
     console.log('State:', stateWithId);
     console.log('Code verifier length:', codeVerifier.length);
     console.log('Cookie encrypted successfully:', !!encryptedCookieValue);
 
-    // Create response with redirect to Twitter auth URL
-    const response = NextResponse.redirect(twitterAuthUrl);
+    // Create response with redirect to YouTube auth URL
+    const response = NextResponse.redirect(youtubeAuthUrl);
     
     // Set the encrypted cookie with appropriate settings for cross-domain redirects
-    response.cookies.set('twitter_oauth_data', encryptedCookieValue, {
+    response.cookies.set('youtube_oauth_data', encryptedCookieValue, {
       path: '/',
       httpOnly: true,
       secure: true, // Must be secure when using SameSite=None
@@ -99,11 +89,11 @@ export async function GET(request: NextRequest) {
     
     return response;
   } catch (error) {
-    // Log any errors that occur during the process
-    logger.error('Error during Twitter OAuth login: ${error}');
-    console.error('Twitter OAuth login error:', error);
+    logger.error('youtube-api', `Login error: ${error}`);
     
-    // Redirect to an error page if something goes wrong
-    return NextResponse.redirect(new URL('/accounts?error=login_failed', request.url));
+    // Redirect to accounts page with error
+    return NextResponse.redirect(
+      new URL('/accounts?error=youtube_login_failed', request.url)
+    );
   }
 } 

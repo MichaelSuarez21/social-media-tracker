@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 import { twitterPlatform } from '@/lib/social/TwitterPlatform';
+import { youtubePlatform } from '@/lib/social/YoutubePlatform';
 
 // This map contains all supported platforms
 const platforms = {
   twitter: twitterPlatform,
+  youtube: youtubePlatform,
   // Add more platforms here as they're implemented:
   // instagram: instagramPlatform,
   // facebook: facebookPlatform,
@@ -145,71 +147,23 @@ export async function GET(
           return NextResponse.json({
             ...metrics,
             _warning: `The Twitter metrics appear to be incomplete or limited. This could be due to API rate limits, scope limitations, or recently connected accounts.`,
-            _cached: false
+            _source: metrics._cache?.source || 'api'
           });
         }
         
-        // Return the metrics with cache information
-        console.log(`[API] Successfully retrieved metrics for ${platformName}`);
+        // Add source information to response
+        return NextResponse.json({
+          ...metrics,
+          _source: metrics._cache?.source || 'api'
+        });
+      } catch (error) {
+        console.error(`[API] Error getting ${platformName} metrics:`, error);
         
-        // Extract cache information if available
-        const cacheInfo = (metrics as any)._cache || { fromCache: false, timestamp: Date.now() };
-        
-        // Create a clean copy of metrics without the _cache property
-        const { _cache, ...cleanMetrics } = metrics as any;
-        
-        // Format the response with cache information
-        const responseWithMetadata = {
-          ...cleanMetrics,
-          _cacheStatus: {
-            fromCache: cacheInfo.fromCache || false,
-            expired: cacheInfo.expired || false,
-            lastUpdated: cacheInfo.timestamp ? new Date(cacheInfo.timestamp).toISOString() : new Date().toISOString()
-          }
-        };
-        
-        return NextResponse.json(responseWithMetadata);
-      } catch (metricsError: any) {
-        console.error(`[API] Error getting metrics from ${platformName}:`, metricsError);
-        
-        // Check for specific Twitter error patterns
-        const errorMessage = metricsError.message || '';
-        
-        // Handle rate limiting errors specifically
-        if (errorMessage.includes('429') || errorMessage.toLowerCase().includes('rate limit')) {
-          console.warn(`[API] Twitter API rate limit likely exceeded`);
-          return NextResponse.json(
-            { 
-              error: `Twitter API rate limit reached. Please try again later.`,
-              details: errorMessage,
-              _suggestion: `Try again in a few minutes or check your Twitter API access level.`
-            },
-            { status: 429 }
-          );
-        }
-        
-        // Handle authentication errors
-        if (errorMessage.includes('401') || errorMessage.includes('403') || 
-            errorMessage.toLowerCase().includes('unauthorized') || 
-            errorMessage.toLowerCase().includes('authentication')) {
-          console.warn(`[API] Twitter API authentication issue detected`);
-          return NextResponse.json(
-            { 
-              error: `Twitter authentication error. You may need to reconnect your account.`,
-              details: errorMessage,
-              _suggestion: `Try disconnecting and reconnecting your Twitter account.`
-            },
-            { status: 401 }
-          );
-        }
-        
-        // Return more helpful error information
         return NextResponse.json(
           { 
             error: `Error fetching ${platformName} metrics`,
-            message: metricsError.message,
-            stack: process.env.NODE_ENV === 'development' ? metricsError.stack : undefined,
-            _suggestion: `Check the browser console and server logs for more details.`
+            message: error instanceof Error ? error.message : String(error),
+            suggestion: `Try reconnecting your ${platformName} account`
           },
           { status: 500 }
         );

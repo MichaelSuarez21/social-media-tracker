@@ -11,7 +11,7 @@ import logger, { configureLogger } from "@/lib/logger";
 configureLogger();
 
 // Log app startup
-logger.info('App', 'SocialTrack application initializing');
+logger.info('App initialization');
 
 // Use Google Fonts
 const geistSans = Geist({

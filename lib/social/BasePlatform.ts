@@ -66,8 +66,26 @@ export type CachedSocialMetrics = SocialMetrics & {
     timestamp?: number;
     expired?: boolean;
     error?: boolean;
+    age?: number;
+    source?: 'memory' | 'database' | 'api';
   } 
 };
+
+/**
+ * Interface for the database metrics record
+ */
+export interface SocialMetricsRecord {
+  social_account_id: string;
+  metric_date: string;
+  followers: number;
+  following: number;
+  posts: number;
+  views: number;
+  likes: number;
+  comments: number;
+  shares: number;
+  engagement_rate?: number;
+}
 
 /**
  * Abstract base class for all social media platform implementations
@@ -457,5 +475,127 @@ export abstract class BasePlatform {
       logger.error(this.platform, `Error ensuring valid tokens: ${error.message || String(error)}`);
       return null;
     }
+  }
+
+  /**
+   * Stores metrics data in the social_metrics table
+   * @param supabase Supabase client
+   * @param accountId Social account ID
+   * @param metrics Metrics data to store
+   * @returns Promise resolving to success status
+   */
+  async storeMetricsInDatabase(
+    supabase: any,
+    accountId: string,
+    metrics: SocialMetrics
+  ): Promise<boolean> {
+    try {
+      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+      
+      // Prepare metrics record
+      const metricsRecord: SocialMetricsRecord = {
+        social_account_id: accountId,
+        metric_date: today,
+        followers: metrics.accountInfo.followers || 0,
+        following: metrics.accountInfo.following || 0,
+        posts: metrics.posts.length,
+        // Aggregate metrics across all posts
+        views: metrics.posts.reduce((sum, post) => sum + (post.metrics.views || post.metrics.impressions || 0), 0),
+        likes: metrics.posts.reduce((sum, post) => sum + (post.metrics.likes || 0), 0),
+        comments: metrics.posts.reduce((sum, post) => sum + (post.metrics.comments || 0), 0),
+        shares: metrics.posts.reduce((sum, post) => sum + (post.metrics.shares || post.metrics.retweets || 0), 0)
+      };
+      
+      // Calculate engagement rate if possible
+      const totalEngagements = metricsRecord.likes + metricsRecord.comments + metricsRecord.shares;
+      if (metricsRecord.views > 0) {
+        metricsRecord.engagement_rate = parseFloat(((totalEngagements / metricsRecord.views) * 100).toFixed(2));
+      }
+      
+      // Upsert to handle both insert and update cases
+      const { error } = await supabase
+        .from('social_metrics')
+        .upsert(metricsRecord)
+        .select();
+      
+      if (error) {
+        logger.error(this.platform, `Error storing metrics in database: ${error.message}`);
+        return false;
+      }
+      
+      logger.info(this.platform, `Successfully stored metrics in database for account ${accountId}`);
+      return true;
+    } catch (error) {
+      logger.error(this.platform, `Error in storeMetricsInDatabase: ${error}`);
+      return false;
+    }
+  }
+
+  /**
+   * Gets metrics from the database if available and not stale
+   * @param supabase Supabase client
+   * @param accountId Social account ID
+   * @param maxAgeDays Maximum age of metrics in days (defaults to 1)
+   * @returns Promise resolving to metrics or null if not found/stale
+   */
+  async getMetricsFromDatabase(
+    supabase: any,
+    accountId: string,
+    maxAgeDays: number = 1
+  ): Promise<any | null> {
+    try {
+      // Calculate the oldest acceptable date
+      const oldestDate = new Date();
+      oldestDate.setDate(oldestDate.getDate() - maxAgeDays);
+      const oldestDateStr = oldestDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+      
+      // Get the most recent metrics record
+      const { data, error } = await supabase
+        .from('social_metrics')
+        .select('*')
+        .eq('social_account_id', accountId)
+        .gte('metric_date', oldestDateStr)
+        .order('metric_date', { ascending: false })
+        .limit(1)
+        .single();
+      
+      if (error || !data) {
+        logger.info(this.platform, `No recent metrics found in database for account ${accountId}`);
+        return null;
+      }
+      
+      logger.info(this.platform, `Found metrics in database for account ${accountId} from ${data.metric_date}`);
+      return data;
+    } catch (error) {
+      logger.error(this.platform, `Error in getMetricsFromDatabase: ${error}`);
+      return null;
+    }
+  }
+
+  /**
+   * Creates a Supabase client
+   * @returns Supabase client
+   */
+  protected getSupabaseClient(): any {
+    // Use the server-side client when running on the server
+    if (typeof window === 'undefined') {
+      try {
+        const { createClient } = require('@supabase/supabase-js');
+        return createClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+          process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+        );
+      } catch (error) {
+        logger.error(this.platform, `Error creating server-side Supabase client: ${error}`);
+        return null;
+      }
+    }
+    
+    // Use the browser client when running in the browser
+    const { createClient } = require('@supabase/supabase-js');
+    return createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+    );
   }
 } 

@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
       isReconnect = oauthData.isReconnect;
       loginId = oauthData.loginId;
     } else {
-      logger.error('twitter-api', 'Failed to decrypt OAuth cookie');
+      logger.error('Failed to decrypt OAuth cookie', { error });
       return NextResponse.redirect(new URL('/accounts?error=cookie_decryption_failed', request.url));
     }
   } else {
@@ -85,8 +85,8 @@ export async function GET(request: NextRequest) {
         codeVerifier = sessionData.codeVerifier;
         isReconnect = sessionData.isReconnect;
       } else {
-        logger.error('twitter-api', 'No OAuth session found in server-side store');
-        return NextResponse.redirect(new URL('/accounts?error=no_session_found', request.url));
+        logger.error('No OAuth session found in server-side store');
+        return NextResponse.redirect(new URL('/accounts?error=no_session', request.url));
       }
     } else {
       logger.error('twitter-api', 'No OAuth cookie found and state format invalid');
@@ -101,12 +101,9 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Create a route handler client for Supabase with better cookie handling
-    console.log('Initializing Supabase client...');
+    // Create a Supabase client
     const cookieStore = cookies();
-    const supabase = createRouteHandlerClient({ 
-      cookies: () => cookieStore 
-    });
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
     
     console.log('Checking user session...');
     const { data: { session: userSession }, error: sessionError } = await supabase.auth.getSession();
@@ -120,7 +117,7 @@ export async function GET(request: NextRequest) {
     
     // Check if the user is authenticated
     if (!userSession?.user) {
-      logger.warn('twitter-api', 'User not authenticated during callback');
+      logger.warn('User not authenticated during callback');
       return NextResponse.redirect(new URL('/login', request.url));
     }
 

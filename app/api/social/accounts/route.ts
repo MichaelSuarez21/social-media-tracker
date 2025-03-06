@@ -3,10 +3,12 @@ import { cookies } from 'next/headers';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import logger from '@/lib/logger';
 import { TwitterPlatform } from '@/lib/social/TwitterPlatform';
+import { YoutubePlatform } from '@/lib/social/YoutubePlatform';
 
 // Map of supported platforms 
 const platforms = {
-  twitter: new TwitterPlatform()
+  twitter: new TwitterPlatform(),
+  youtube: new YoutubePlatform()
 };
 
 export async function GET(request: NextRequest) {
@@ -15,8 +17,9 @@ export async function GET(request: NextRequest) {
   const includeStatus = searchParams.get('includeStatus') === 'true';
 
   try {
-    // Create a Supabase client with the cookies
-    const supabase = createRouteHandlerClient({ cookies });
+    // Create a Supabase client
+    const cookieStore = cookies();
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
 
     // Get the authenticated user's session
     const { data: { session } } = await supabase.auth.getSession();
@@ -33,7 +36,7 @@ export async function GET(request: NextRequest) {
       .eq('user_id', session.user.id);
 
     if (error) {
-      logger.error('api', 'Error fetching social accounts', error);
+      logger.error('Error fetching social accounts', { error });
       return NextResponse.json({ error: 'Failed to fetch accounts' }, { status: 500 });
     }
 
@@ -59,7 +62,7 @@ export async function GET(request: NextRequest) {
             status: tokenStatus
           };
         } catch (error) {
-          logger.error('api', `Error checking token status for ${account.platform}`, error);
+          logger.error(`Error checking token status for ${account.platform}`, { error });
           return {
             ...account,
             status: 'error'
@@ -79,7 +82,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ accounts: formattedAccounts });
   } catch (error) {
-    logger.error('api', 'Error in accounts API', error);
+    logger.error('Error in accounts API', { error });
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
@@ -94,8 +97,9 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Platform is required' }, { status: 400 });
     }
 
-    // Create a Supabase client with the cookies
-    const supabase = createRouteHandlerClient({ cookies });
+    // Create a Supabase client
+    const cookieStore = cookies();
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
 
     // Get the authenticated user's session
     const { data: { session } } = await supabase.auth.getSession();
@@ -113,13 +117,13 @@ export async function DELETE(request: NextRequest) {
       .eq('platform', platform);
 
     if (error) {
-      logger.error('api', `Error deleting ${platform} account`, error);
+      logger.error(`Error deleting ${platform} account`, { error });
       return NextResponse.json({ error: 'Failed to disconnect account' }, { status: 500 });
     }
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    logger.error('api', 'Error in DELETE accounts API', error);
+    logger.error('Error in DELETE accounts API', { error });
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 } 
